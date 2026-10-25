@@ -58,8 +58,11 @@ async function pauseWhatsApp() {
 export default async function ConnectPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const ctx = await requireWorkspace();
   const sp = await searchParams;
-  const { data: conns } = await supabaseAdmin().from("channel_connections")
+  const db0 = supabaseAdmin();
+  const { data: conns } = await db0.from("channel_connections")
     .select("provider,external_id,display_name,status").eq("workspace_id", ctx.workspace.id);
+  const { data: adConns } = await db0.from("ad_connections")
+    .select("ad_account_id,name,currency,status").eq("workspace_id", ctx.workspace.id);
   const appId = process.env.NEXT_PUBLIC_META_APP_ID ?? "";
   const configId = process.env.NEXT_PUBLIC_META_CONFIG_ID ?? "";
   const errors: Record<string, string> = {
@@ -80,7 +83,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
       {sp.saved && saved[sp.saved] && <div className="notice notice-ok" role="status">{saved[sp.saved]}</div>}
       {sp.error && <div className="notice notice-bad" role="alert">{errors[sp.error] ?? "Something went wrong."}</div>}
       {sp.saved === "facebook" && <div className="notice notice-ok" role="status">
-        Connected {sp.pages ?? 0} Facebook Page{sp.pages === "1" ? "" : "s"} and {sp.ig ?? 0} Instagram account{sp.ig === "1" ? "" : "s"}.
+        Connected {sp.pages ?? 0} Facebook Page{sp.pages === "1" ? "" : "s"}, {sp.ig ?? 0} Instagram account{sp.ig === "1" ? "" : "s"}{Number(sp.ads) > 0 ? `, and ${sp.ads} ad account${sp.ads === "1" ? "" : "s"}` : ""}.
         {Number(sp.skipped) > 0 ? ` ${sp.skipped} skipped: already connected to another business, or Meta did not allow it.` : ""}
       </div>}
 
@@ -108,6 +111,21 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
                 <li key={`${c.provider}-${c.external_id}`}>{c.provider === "facebook" ? "Facebook Page" : "Instagram"}: <b>{c.display_name ?? c.external_id}</b> {c.status === "active" ? "· replying" : "· paused"}</li>
               ))}
             </ul>}
+      </section>
+
+      <section className="panel" style={{ marginTop: 16 }}>
+        <h2>Ads</h2>
+        <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Run Facebook and Instagram ads that send people straight into a chat with your assistant. Connect through the same Facebook login above, then launch a campaign from the Ads page.</p>
+        {(adConns ?? []).length === 0
+          ? <p style={{ color: "var(--ink-70)", fontSize: 14 }}>No ad account connected yet. Use <b>Connect Facebook &amp; Instagram</b> above and grant ads access when Facebook asks.</p>
+          : <>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {(adConns ?? []).map((a) => (
+                  <li key={a.ad_account_id}>Ad account: <b>{a.name ?? a.ad_account_id}</b> {a.currency ? `(${a.currency})` : ""} {a.status === "active" ? "· ready" : "· paused"}</li>
+                ))}
+              </ul>
+              <p style={{ marginTop: 12 }}><a href="/dashboard/ads" className="btn btn-lime btn-sm">Go to Ads</a></p>
+            </>}
       </section>
     </>
   );

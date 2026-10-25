@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin, supabaseUser } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
-import { exchangeFacebookCode, listPages, subscribePage } from "@/lib/meta";
+import { exchangeFacebookCode, listPages, subscribePage, longLivedToken, listAdAccounts } from "@/lib/meta";
 import { serverEnv } from "@/lib/env";
 import { FB_REDIRECT_PATH, stateValid } from "@/lib/meta-oauth";
 
@@ -30,16 +30,18 @@ export async function GET(req: Request) {
     .eq("workspace_id", wsId).eq("user_id", user.id).maybeSingle();
   if (!member || !(member.role === "owner" || member.role === "admin")) return back("error=role");
 
-  let pages;
+  let pages, adAccounts, userToken;
   try {
-    const userToken = await exchangeFacebookCode(code, `${site}${FB_REDIRECT_PATH}`);
+    const shortToken = await exchangeFacebookCode(code, `${site}${FB_REDIRECT_PATH}`);
+    userToken = await longLivedToken(shortToken);
     pages = await listPages(userToken);
+    adAccounts = await listAdAccounts(userToken).catch(() => []); // ads are optional; don't fail the whole connect
   } catch (e) {
     console.error("[meta] facebook connect failed", (e as Error).message);
     return back("error=meta");
   }
 
-  let pagesSaved = 0, igSaved = 0, skipped = 0;
+  let pagesSaved = 0, igSaved = 0, skipped = 0, adsSaved = 0;
   for (const p of pages) {
     // A Page belongs to one business. Skip rather than move someone else's connection.
     const { data: other } = await db.from("channel_connections").select("workspace_id")
@@ -63,9 +65,22 @@ export async function GET(req: Request) {
       igSaved++;
     }
   }
-  await db.from("financial_audit_logs").insert({ workspace_id: wsId, actor_id: user.id, action: "channel.meta_connected", entity: "workspace", entity_id: wsId, details: { pages: pagesSaved, instagram: igSaved, skipped } });
+  // Ad accounts: store each with the long-lived user token, so the business can run campaigns from Dall AI.
+  const encUser = encryptSecret(userToken);
+  for (const a of adAccounts ?? []) {
+    const { data: other } = await db.from("ad_connections").select("workspace_id")
+      .eq("ad_account_id", a.id).maybeSingle();
+    if (other && other.workspace_id !== wsId) continue; // another business already connected this ad account
+    await db.from("ad_connections").upsert({
+      workspace_id: wsId, ad_account_id: a.id, name: a.name ?? null, currency: a.currency ?? null,
+      access_token_enc: encUser, status: "active",
+    }, { onConflict: "workspace_id,ad_account_id" });
+    adsSaved++;
+  }
 
-  const res = back(`saved=facebook&pages=${pagesSaved}&ig=${igSaved}&skipped=${skipped}`);
+  await db.from("financial_audit_logs").insert({ workspace_id: wsId, actor_id: user.id, action: "channel.meta_connected", entity: "workspace", entity_id: wsId, details: { pages: pagesSaved, instagram: igSaved, skipped, ad_accounts: adsSaved } });
+
+  const res = back(`saved=facebook&pages=${pagesSaved}&ig=${igSaved}&skipped=${skipped}&ads=${adsSaved}`);
   res.cookies.set("meta_oauth", "", { path: "/api/meta/facebook", maxAge: 0 });
   return res;
 }
