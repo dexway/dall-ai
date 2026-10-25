@@ -68,6 +68,8 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
     taken: "This WhatsApp number is already connected to another business.",
     meta: "Meta did not accept the connection. Check the app setup, then try again.",
     save: "Couldn't save the connection. Try again.",
+    cancelled: "The Facebook login was cancelled. Start again when you are ready.",
+    state: "That login link expired or was changed. Start again from this page.",
   };
   const saved: Record<string, string> = { connected: "WhatsApp connected. Customers can now message this number.", paused: "WhatsApp paused. Customers will not get replies until you connect again." };
   const wa = conns?.find((c) => c.provider === "whatsapp");
@@ -77,6 +79,10 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
       <div className="page-head"><div><h1>Connect with Meta</h1><p>Link your WhatsApp Business number, and later your Instagram and Facebook pages, in a few clicks. Your assistant then answers customers there, 24/7.</p></div></div>
       {sp.saved && saved[sp.saved] && <div className="notice notice-ok" role="status">{saved[sp.saved]}</div>}
       {sp.error && <div className="notice notice-bad" role="alert">{errors[sp.error] ?? "Something went wrong."}</div>}
+      {sp.saved === "facebook" && <div className="notice notice-ok" role="status">
+        Connected {sp.pages ?? 0} Facebook Page{sp.pages === "1" ? "" : "s"} and {sp.ig ?? 0} Instagram account{sp.ig === "1" ? "" : "s"}.
+        {Number(sp.skipped) > 0 ? ` ${sp.skipped} skipped: already connected to another business, or Meta did not allow it.` : ""}
+      </div>}
 
       <section className="panel">
         <h2>WhatsApp</h2>
@@ -92,8 +98,16 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
       </section>
 
       <section className="panel" style={{ marginTop: 16 }}>
-        <h2>Instagram and Facebook</h2>
-        <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Coming next. These use the same Meta app and need Meta to approve the messaging permissions first.</p>
+        <h2>Facebook Page and Instagram</h2>
+        <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Log in with Facebook, choose the Page and Instagram account to connect, and your assistant answers their Messenger and Instagram DMs. Other businesses can use this only after Meta approves the app.</p>
+        <p><a href="/api/meta/facebook/start" className="btn btn-lime btn-sm">Connect Facebook &amp; Instagram</a></p>
+        {(conns ?? []).filter((c) => c.provider === "facebook" || c.provider === "instagram").length === 0
+          ? <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Nothing connected yet.</p>
+          : <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {(conns ?? []).filter((c) => c.provider === "facebook" || c.provider === "instagram").map((c) => (
+                <li key={`${c.provider}-${c.external_id}`}>{c.provider === "facebook" ? "Facebook Page" : "Instagram"}: <b>{c.display_name ?? c.external_id}</b> {c.status === "active" ? "· replying" : "· paused"}</li>
+              ))}
+            </ul>}
       </section>
     </>
   );
