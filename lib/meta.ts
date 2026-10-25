@@ -122,12 +122,19 @@ const DEST: Record<AdDestination, { destination_type: string; cta: string }> = {
   instagram: { destination_type: "INSTAGRAM_DIRECT", cta: "INSTAGRAM_MESSAGE" },
 };
 
+export type AdTargeting = { countries?: string[]; ageMin?: number; ageMax?: number; genders?: number[] };
+
 /** Creates a click-to-chat campaign, ad set, creative and ad — all PAUSED. Returns the Meta ids. */
 export async function launchClickToChatAd(args: {
   adAccountId: string; token: string; pageId: string; destination: AdDestination;
-  name: string; message: string; dailyBudgetMinor: number; imageUrl?: string | null; countries?: string[];
+  name: string; message: string; dailyBudgetMinor: number; imageUrl?: string | null; targeting?: AdTargeting;
 }): Promise<{ campaignId: string; adsetId: string; creativeId: string; adId: string }> {
   const d = DEST[args.destination];
+  const t = args.targeting ?? {};
+  const targeting: Record<string, unknown> = { geo_locations: { countries: t.countries ?? ["NG"] } };
+  if (t.ageMin) targeting.age_min = t.ageMin;
+  if (t.ageMax) targeting.age_max = t.ageMax;
+  if (t.genders && t.genders.length) targeting.genders = t.genders;
 
   const campaign = await adPost(args.adAccountId, "campaigns", args.token, {
     name: args.name, objective: "OUTCOME_ENGAGEMENT", special_ad_categories: [], status: "PAUSED",
@@ -137,7 +144,7 @@ export async function launchClickToChatAd(args: {
     name: args.name, campaign_id: campaign.id, daily_budget: args.dailyBudgetMinor,
     billing_event: "IMPRESSIONS", optimization_goal: "CONVERSATIONS",
     destination_type: d.destination_type, promoted_object: { page_id: args.pageId },
-    targeting: { geo_locations: { countries: args.countries ?? ["NG"] } },
+    targeting,
     status: "PAUSED",
   });
 
