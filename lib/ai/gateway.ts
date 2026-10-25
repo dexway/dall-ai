@@ -121,7 +121,9 @@ export async function gatewayCall(req: GatewayRequest): Promise<Anthropic.Messag
     if (err instanceof GatewayError) { await settle(false, null, null, err.code); throw err; }
     const status = (err as { status?: number }).status;
     await settle(false, null, null, `provider_error_${status ?? "network"}`);
-    console.error("[gateway] provider error", { status, workspace: req.workspaceId, feature: req.feature });
+    // Provider error text never contains our key; it explains bad requests, billing and auth problems.
+    const detail = String((err as { message?: string }).message ?? "").slice(0, 400);
+    console.error("[gateway] provider error", { status, workspace: req.workspaceId, feature: req.feature, model, detail });
     throw new GatewayError("PROVIDER_ERROR", 502, "The assistant could not reply just now. Please try again.");
   }
 }
