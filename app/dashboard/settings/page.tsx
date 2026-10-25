@@ -48,13 +48,40 @@ async function savePaystack(formData: FormData) {
   redirect("/dashboard/settings?saved=paystack");
 }
 
+async function saveWhatsApp(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/settings?error=role");
+  const phoneId = String(formData.get("phone_number_id") ?? "").replace(/\D/g, "");
+  const token = String(formData.get("access_token") ?? "").trim();
+  const name = String(formData.get("display_name") ?? "").trim() || null;
+  if (!phoneId) redirect("/dashboard/settings?error=wa_id");
+  if (token.length < 20) redirect("/dashboard/settings?error=wa_token");
+  const db = supabaseAdmin();
+  // A number can belong to one business only. Refuse rather than move someone else's connection.
+  const { data: other } = await db.from("channel_connections").select("workspace_id")
+    .eq("provider", "whatsapp").eq("external_id", phoneId).maybeSingle();
+  if (other && other.workspace_id !== ctx.workspace.id) redirect("/dashboard/settings?error=wa_taken");
+  const { error } = await db.from("channel_connections").upsert({
+    workspace_id: ctx.workspace.id, provider: "whatsapp", external_id: phoneId, display_name: name,
+    access_token_enc: encryptSecret(token), status: "active",
+  }, { onConflict: "provider,external_id" });
+  if (error) redirect("/dashboard/settings?error=save");
+  await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, actor_id: ctx.user.id, action: "settings.whatsapp", entity: "workspace", entity_id: ctx.workspace.id, details: { phone_number_id: phoneId } });
+  revalidatePath("/dashboard/settings");
+  redirect("/dashboard/settings?saved=whatsapp");
+}
+
 export default async function Settings({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const ctx = await requireWorkspace();
   const sp = await searchParams;
   const { data: s } = await ctx.db.from("business_payment_settings").select("*").eq("workspace_id", ctx.workspace.id).single();
   const { data: sec } = await supabaseAdmin().from("business_payment_secrets").select("updated_at").eq("workspace_id", ctx.workspace.id).maybeSingle();
   const webhook = `${serverEnv.siteUrl()}/api/webhooks/paystack/${ctx.workspace.id}`;
-  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", save: "Couldn't save. Try again." };
+  const { data: wa } = await supabaseAdmin().from("channel_connections").select("external_id,display_name,status")
+    .eq("workspace_id", ctx.workspace.id).eq("provider", "whatsapp").maybeSingle();
+  const waCallback = `${serverEnv.siteUrl()}/api/webhooks/whatsapp`;
+  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", save: "Couldn't save. Try again.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
 
   return (
     <>
@@ -91,6 +118,23 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <div><button className="btn btn-ink">Save Paystack</button></div>
         </form>
       </div>
+
+      <form action={saveWhatsApp} className="panel" style={{ marginTop: 16 }}>
+        <h2>WhatsApp</h2>
+        <p style={{ color: "var(--ink-70)", fontSize: 14 }}>
+          {wa ? <>Connected: number ID <b className="mono">{wa.external_id}</b>{wa.display_name ? <> ({wa.display_name})</> : null}. Enter a token below to replace it.</>
+            : <>Not connected yet. Customers who message your WhatsApp number will be answered by your assistant.</>}
+        </p>
+        <div className="form-grid">
+          <label className="field"><span>Phone number ID</span><input id="phone_number_id" name="phone_number_id" className="input mono" inputMode="numeric" defaultValue={wa?.external_id ?? ""} placeholder="From Meta → WhatsApp → API Setup" /></label>
+          <label className="field"><span>Display name (optional)</span><input id="display_name" name="display_name" className="input" defaultValue={wa?.display_name ?? ""} placeholder="e.g. Mama Ngozi Kitchen" /></label>
+        </div>
+        <label className="field"><span>Access token</span><input id="access_token" name="access_token" type="password" autoComplete="off" className="input mono" placeholder="EAA… (permanent system-user token)" />
+          <small>Encrypted before it&apos;s stored. It is never shown again.</small></label>
+        <div className="field"><span>Callback URL (paste into Meta → WhatsApp → Configuration)</span><code className="input mono" style={{ overflowWrap: "anywhere", display: "block" }}>{waCallback}</code>
+          <small>Meta also asks for a verify token. Your developer sets it as WHATSAPP_VERIFY_TOKEN.</small></div>
+        <div><button className="btn btn-ink">Save WhatsApp</button></div>
+      </form>
     </>
   );
 }
