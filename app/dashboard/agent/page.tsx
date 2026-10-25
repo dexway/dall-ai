@@ -129,11 +129,10 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
         save={save} learnFromWebsite={learnFromWebsite} saveAsPreset={saveAsPreset}
       />
 
-      <section className="panel" style={{ marginTop: 16 }}>
-        <h2>Launch kit</h2>
+      <div style={{ marginTop: 16 }}>
         <LaunchKit agent={{ name: a.name, role: a.role_title, color: a.accent_color, avatar: avatarUrl, languages: a.languages }}
           business={ctx.workspace.name} slug={ctx.workspace.slug} images={images} />
-      </section>
+      </div>
     </>
   );
 }
