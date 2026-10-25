@@ -2,11 +2,12 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { serverEnv } from "@/lib/env";
 
-// Permissions for Messenger and Instagram DMs, plus ads so a business can run campaigns from Dall AI.
+// Permissions for Messenger DMs and ads so a business can run campaigns from Dall AI.
+// Instagram DM scopes (instagram_basic, instagram_manage_messages) are added back once the
+// Instagram use case is configured for the app — Facebook rejects them until then.
 // Other businesses only get these after Meta App Review.
 export const FACEBOOK_SCOPES = [
   "pages_show_list", "pages_messaging", "pages_manage_metadata", "business_management",
-  "instagram_basic", "instagram_manage_messages",
   "ads_management", "ads_read",
 ];
 
