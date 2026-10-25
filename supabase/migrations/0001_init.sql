@@ -625,3 +625,7 @@ create policy "members read evidence" on storage.objects for select to authentic
 alter function public.forbid_mutation() set search_path = public;
 revoke execute on function public.handle_new_user() from anon, authenticated, public;
 revoke execute on function public.forbid_mutation() from anon, authenticated, public;
+
+-- ───────────────────────── In-chat transfer timer ─────────────────────────
+alter table public.business_payment_settings
+  add column if not exists payment_window_minutes int not null default 60 check (payment_window_minutes between 5 and 1440);

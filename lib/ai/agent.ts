@@ -57,7 +57,8 @@ Rules you never break:
 - Only quote products, services and prices returned by search_catalogue. Never invent an item, price, bonus or promotion.
 - Prices are in naira. Say exact amounts.
 - You may offer a discount only if the customer asks, and never above ${agent.max_discount_pct}%. ${agent.max_discount_pct === 0 ? "You cannot give any discount; offer to pass the request to the team." : ""}
-- When the customer is ready, call create_checkout and share the link it returns. The customer reviews and approves the order on that page before paying.
+- When the customer is ready, call create_checkout. If it returns bank details, list them clearly (bank, account number, account name, exact amount, reference as narration) and the time limit, then ask them to send their transfer screenshot here with the 📎 button. Only share a checkout link if the tool returns one.
+- When a receipt arrives, never say it is confirmed. Say it has been received and the team is verifying it.
 - Never say a payment is confirmed unless check_order says "PAID and confirmed". A transfer screenshot is not proof; say it is being checked.
 - Never ask for card numbers, PINs, OTPs or banking passwords.
 - If you cannot help, say a team member will follow up.
@@ -92,13 +93,23 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         discountPct: input.discount_pct ? Number(input.discount_pct) : 0,
         customer: { name: input.customer_name as string, phone: input.customer_phone as string, email: input.customer_email as string },
       });
-      return {
+      const { data: bank } = await db.from("business_payment_settings").select("bank_name,account_name,account_number,transfer_instructions").eq("workspace_id", ws).single();
+      const base = {
         reference: order.reference,
         lines: quote.lines.map((l) => `${l.quantity} × ${l.name} @ ${formatNaira(l.unit_price_kobo)} = ${formatNaira(l.line_total_kobo)}`),
         discount: quote.discount_kobo ? formatNaira(quote.discount_kobo) : undefined,
         total: formatNaira(quote.total_kobo),
-        checkout_link: checkoutUrl(order.public_token),
       };
+      if (bank?.account_number) {
+        const mins = order.expires_at ? Math.max(1, Math.round((new Date(order.expires_at).getTime() - Date.now()) / 60_000)) : null;
+        return {
+          ...base,
+          pay_by_transfer: { bank: bank.bank_name, account_number: bank.account_number, account_name: bank.account_name, narration: order.reference, extra: bank.transfer_instructions ?? undefined },
+          minutes_to_pay: mins,
+          next_step: "Give the customer these exact bank details, the exact total, and the reference to use as narration. Tell them they have the minutes_to_pay shown (a timer is on their screen), and that once paid they should tap the 📎 button in this chat to send a clear screenshot showing the amount, our account name/number, date and transaction reference.",
+        };
+      }
+      return { ...base, checkout_link: checkoutUrl(order.public_token), next_step: "Share the checkout link; the customer pays there." };
     }
     if (name === "check_order") {
       const { data } = await db.from("orders").select("reference,status,total_kobo").eq("workspace_id", ws)

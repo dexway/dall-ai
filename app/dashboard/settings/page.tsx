@@ -19,6 +19,7 @@ async function saveBank(formData: FormData) {
     account_number: acct || null,
     transfer_instructions: String(formData.get("transfer_instructions") ?? "").trim() || null,
     payment_deadline_hours: Math.min(168, Math.max(1, Number(formData.get("payment_deadline_hours")) || 24)),
+    payment_window_minutes: Math.min(1440, Math.max(5, Number(formData.get("payment_window_minutes")) || 60)),
     updated_at: new Date().toISOString(),
   }).eq("workspace_id", ctx.workspace.id);
   if (error) redirect("/dashboard/settings?error=save");
@@ -65,14 +66,16 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       <div className="two">
         <form action={saveBank} className="panel">
           <h2>Bank transfer</h2>
-          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Shown on the checkout page with the exact amount and order reference.</p>
+          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Your assistant sends these in the chat with the exact amount and order reference, then asks for the transfer screenshot.</p>
           <div className="form-grid">
             <label className="field"><span>Bank</span><input id="bank_name" name="bank_name" className="input" defaultValue={s?.bank_name ?? ""} placeholder="e.g. GTBank, Moniepoint, Opay" /></label>
             <label className="field"><span>Account number</span><input id="account_number" name="account_number" className="input mono" inputMode="numeric" maxLength={10} defaultValue={s?.account_number ?? ""} /></label>
           </div>
           <label className="field"><span>Account name</span><input id="account_name" name="account_name" className="input" defaultValue={s?.account_name ?? ""} /></label>
           <label className="field"><span>Extra instructions</span><textarea id="transfer_instructions" name="transfer_instructions" className="input" defaultValue={s?.transfer_instructions ?? ""} placeholder="Use your order reference as the narration." /></label>
-          <label className="field"><span>Customers must pay within (hours)</span><input id="payment_deadline_hours" name="payment_deadline_hours" type="number" min={1} max={168} className="input" defaultValue={s?.payment_deadline_hours ?? 24} /></label>
+          <label className="field"><span>Chat payment timer (minutes)</span><input id="payment_window_minutes" name="payment_window_minutes" type="number" min={5} max={1440} className="input" defaultValue={s?.payment_window_minutes ?? 60} />
+            <small>After your assistant gives your bank details, the customer sees a countdown to pay and send their receipt.</small></label>
+          <input type="hidden" name="payment_deadline_hours" value={s?.payment_deadline_hours ?? 24} />
           <div><button className="btn btn-ink">Save bank details</button></div>
         </form>
 

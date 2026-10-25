@@ -21,3 +21,11 @@
 .bank { background: var(--paper); border-radius: var(--r-md); padding: 16px; display: grid; gap: 6px; }
 .bank .acct { font-family: var(--f-mono); font-size: 24px; letter-spacing: .04em; }
 .powered { text-align: center; font-size: 12px; color: var(--mint-45); }
+.pay-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 14px; font-size: 14px; color: var(--white);
+  background: rgba(200,238,114,.1); border: 1px solid rgba(200,238,114,.45); }
+.pay-bar .timer { margin-left: auto; color: var(--lime); font-weight: 500; }
+.pay-bar.late { background: rgba(215,122,92,.15); border-color: rgba(215,122,92,.6); }
+.pay-bar.late .timer { color: var(--coral); }
+.pay-bar.ok { background: rgba(62,142,90,.2); border-color: rgba(62,142,90,.6); }
+.composer .attach { border: 0; background: transparent; font-size: 18px; padding: 0 4px 0 10px; cursor: pointer; color: var(--white); }
+.composer .attach:disabled { opacity: .35; cursor: not-allowed; }

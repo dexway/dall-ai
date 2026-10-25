@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { runAgentTurn } from "@/lib/ai/agent";
 import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
+import { findConversation, pendingOrder } from "@/lib/chat-session";
 
 // Public web-widget endpoint. Anyone can chat; every reply is metered to the business that owns the agent.
 const Body = z.object({
@@ -49,7 +50,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   try {
     const reply = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: message });
     await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "assistant", content: { text: reply } });
-    return NextResponse.json({ reply, conversationId: conversation.id, visitorToken: conversation.visitor_token });
+    return NextResponse.json({ reply, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
   } catch (e) {
     if (e instanceof GatewayError) {
       // Customers see a polite message; the business owner sees the real reason in the dashboard.
@@ -61,4 +62,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
     console.error("[chat] unexpected", (e as Error).message);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }
+}
+
+// Refresh the timer / payment status for a returning visitor.
+export async function GET(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const u = new URL(req.url);
+  const found = await findConversation(slug, u.searchParams.get("c"), u.searchParams.get("v"));
+  if (!found) return NextResponse.json({ pending: null });
+  return NextResponse.json({ pending: await pendingOrder(found.conv.id) });
 }

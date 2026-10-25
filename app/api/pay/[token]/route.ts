@@ -4,13 +4,10 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { loadCheckout } from "@/lib/checkout";
 import { decryptSecret } from "@/lib/crypto";
 import { initializeTransaction } from "@/lib/paystack";
-import { extractReceipt, receiptFlags } from "@/lib/ai/receipt";
-import { GatewayError } from "@/lib/ai/gateway";
+import { submitEvidence, EvidenceError } from "@/lib/evidence";
 import { serverEnv } from "@/lib/env";
 
 // Customer-facing checkout actions. The order token in the URL is the only credential.
-const MAX_FILE = 5 * 1024 * 1024;
-const ALLOWED = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
 
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -61,32 +58,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   if (ct.includes("multipart/form-data")) {
     if (!order.customer_approved_at) return NextResponse.json({ error: "Approve the order first." }, { status: 409 });
     if (!payable) return NextResponse.json({ error: "This order is not awaiting payment." }, { status: 409 });
-    if (c.evidence.filter((e) => e.status === "pending").length >= 3) return NextResponse.json({ error: "Your receipts are already being checked." }, { status: 429 });
     const form = await req.formData();
     const file = form.get("receipt");
     if (!(file instanceof File)) return NextResponse.json({ error: "Attach your transfer receipt." }, { status: 400 });
-    if (file.size > MAX_FILE) return NextResponse.json({ error: "File is larger than 5 MB." }, { status: 413 });
-    if (!ALLOWED.includes(file.type)) return NextResponse.json({ error: "Upload a PNG, JPG, WEBP or PDF." }, { status: 415 });
-
-    const buf = Buffer.from(await file.arrayBuffer());
-    const ext = file.type === "application/pdf" ? "pdf" : file.type.split("/")[1];
-    const path = `${order.workspace_id}/${order.id}/${crypto.randomUUID()}.${ext}`;
-    const up = await db.storage.from("payment-evidence").upload(path, buf, { contentType: file.type });
-    if (up.error) return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
-
-    // Preliminary reading only. A person approves; a screenshot never marks an order paid.
-    let extracted = null, flags: string[] = ["needs_manual_review"];
-    try {
-      const fields = await extractReceipt({ workspaceId: order.workspace_id, mediaType: file.type, base64: buf.toString("base64") });
-      extracted = fields;
-      flags = receiptFlags(fields, { amount_kobo: order.total_kobo, account_number: c.bank?.account_number, account_name: c.bank?.account_name, reference: order.reference, created_at: order.created_at });
-    } catch (e) {
-      if (!(e instanceof GatewayError)) console.error("[pay] receipt read failed", (e as Error).message);
-      flags = ["not_auto_read"];
-    }
-    await db.from("payment_evidence").insert({ workspace_id: order.workspace_id, order_id: order.id, file_path: path, extracted, flags });
-    await db.from("orders").update({ status: "verification_pending" }).eq("id", order.id);
-    await db.from("financial_audit_logs").insert({ workspace_id: order.workspace_id, action: "evidence.submitted", entity: "order", entity_id: order.reference, details: { flags } });
+    try { await submitEvidence(order, file); }
+    catch (e) { if (e instanceof EvidenceError) return NextResponse.json({ error: e.message }, { status: e.status }); throw e; }
     return NextResponse.json({ ok: true, status: "verification_pending" });
   }
 

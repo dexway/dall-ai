@@ -47,7 +47,7 @@ export default function Landing() {
               <h1>The AI staff that answers, sells <em>and checks the money.</em></h1>
               <p className="hero-sub">
                 Give your business an assistant with its own name and face. It replies on WhatsApp, SMS, USSD, your website and phone calls,
-                quotes from your real prices, sends the payment link, and flags fake transfer receipts before you ship.
+                quotes from your real prices, sends your bank details with a payment timer, and flags fake transfer receipts before you ship.
               </p>
               <div className="hero-ctas">
                 <Link href="/signup" className="btn btn-lime">Build your assistant free</Link>
@@ -80,7 +80,7 @@ export default function Landing() {
                 <div className="msg-row t2" aria-hidden><div className="typing-dots glass"><i /><i /><i /></div></div>
                 <div className="msg-row m4"><div className="bubble ai glass">
                   <span className="who">Amaka · AI assistant</span>
-                  Done ✓ Order <span className="mono">MAM-7KQ2X9PD</span>, total <b className="mono">₦140,000</b>. Review and pay here: dall.ai/pay/…
+                  Done ✓ Transfer <b className="mono">₦140,000</b> to GTBank <span className="mono">0123454417</span> · Mama Put Kitchen. Narration <span className="mono">MAM-7KQ2X9PD</span>. You have 60 mins, then send the screenshot here 📎
                 </div></div>
                 <div className="msg-row m5"><div className="receipt-row">
                   <span className="chip chip-glass">Receipt uploaded</span>
@@ -156,9 +156,9 @@ export default function Landing() {
               <div className="step"><b>Discover</b><p>Asks what they need, budget and date.</p></div>
               <div className="step"><b>Recommend</b><p>Basic, standard or premium from your real items.</p></div>
               <div className="step"><b>Quote</b><p>Itemised naira total with any approved discount.</p></div>
-              <div className="step"><b>Checkout</b><p>Customer reviews and approves on a secure page.</p></div>
-              <div className="step"><b>Pay</b><p>Paystack card or bank transfer to your own account.</p></div>
-              <div className="step hot"><b>Verify</b><p>Webhook checked with Paystack, or receipt checked by you.</p></div>
+              <div className="step"><b>Bank details</b><p>Sent in the chat with the exact amount, reference and a countdown.</p></div>
+              <div className="step"><b>Receipt</b><p>Customer taps 📎 and sends the transfer screenshot in the chat.</p></div>
+              <div className="step hot"><b>Verify</b><p>Read and compared automatically, approved by you, confirmed in chat.</p></div>
             </div>
             <div className="verify">
               <div className="receipt" aria-label="Example receipt check">
@@ -178,7 +178,7 @@ export default function Landing() {
                   <li>The assistant reads the screenshot and lines it up against the order: amount, your account, your name, the date.</li>
                   <li>Short payments, wrong accounts, failed transfers and old receipts are flagged in red.</li>
                   <li>A screenshot never marks an order paid on its own. You approve with one tap, and every decision is logged.</li>
-                  <li>Card payments go to your own Paystack account and are confirmed with Paystack directly.</li>
+                  <li>Money goes straight to your own account. Paystack card payments are optional.</li>
                 </ul>
               </div>
             </div>
@@ -259,7 +259,7 @@ export default function Landing() {
                   <tr><td>WhatsApp, SMS, USSD, web chat</td><td>✓ Included</td><td>✓ Usually</td></tr>
                   <tr><td>Phone calls in and out</td><td>✓ With Nigerian voices</td><td>Often extra or missing</td></tr>
                   <tr><td>Quotes from your real catalogue</td><td>✓ Prices computed on our server</td><td>Depends on your setup</td></tr>
-                  <tr><td>Checkout + Paystack to your account</td><td>✓ Built in</td><td>Custom integration</td></tr>
+                  <tr><td>Bank transfer in chat with a payment timer</td><td>✓ Built in</td><td>✗</td></tr>
                   <tr><td>Transfer receipt checking</td><td>✓ Read, compared, flagged</td><td>✗</td></tr>
                   <tr><td>Assistant name, face and voice</td><td>✓ Identity studio</td><td>Name only</td></tr>
                   <tr><td>Launch carousels and status posts</td><td>✓ Launch kit</td><td>✗</td></tr>
