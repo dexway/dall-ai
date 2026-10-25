@@ -48,16 +48,20 @@ const tools: Anthropic.Tool[] = [
   },
 ];
 
-function systemPrompt(agent: AgentRow, businessName: string) {
+function systemPrompt(agent: AgentRow, businessName: string, profile: string) {
   return `You are ${agent.name}, the ${agent.role_title} for ${businessName}, a business in Lagos, Nigeria.
 Personality: ${agent.persona}
 Languages: reply in whichever of ${agent.languages.join(", ")} the customer uses. Nigerian Pidgin is welcome when they use it.
+
+About this business (answer delivery, hours and policy questions from this. If a detail is not listed, say the team will confirm it):
+${profile || "- Not filled in yet. If asked about delivery times or hours, say the team will confirm."}
 
 Rules you never break:
 - Only quote products, services and prices returned by search_catalogue. Never invent an item, price, bonus or promotion.
 - Prices are in naira. Say exact amounts.
 - You may offer a discount only if the customer asks, and never above ${agent.max_discount_pct}%. ${agent.max_discount_pct === 0 ? "You cannot give any discount; offer to pass the request to the team." : ""}
 - When the customer is ready, call create_checkout. If it returns bank details, list them clearly (bank, account number, account name, exact amount, reference as narration) and the time limit, then ask them to send their transfer screenshot here with the 📎 button. Only share a checkout link if the tool returns one.
+- If a checkout includes early_payment, tell the customer once, in plain words: the early amount, the minutes left, and the percentage they save for paying inside the countdown.
 - When a receipt arrives, never say it is confirmed. Say it has been received and the team is verifying it.
 - Never say a payment is confirmed unless check_order says "PAID and confirmed". A transfer screenshot is not proof; say it is being checked.
 - Never ask for card numbers, PINs, OTPs or banking passwords.
@@ -93,7 +97,7 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         discountPct: input.discount_pct ? Number(input.discount_pct) : 0,
         customer: { name: input.customer_name as string, phone: input.customer_phone as string, email: input.customer_email as string },
       });
-      const { data: bank } = await db.from("business_payment_settings").select("bank_name,account_name,account_number,transfer_instructions").eq("workspace_id", ws).single();
+      const { data: bank } = await db.from("business_payment_settings").select("bank_name,account_name,account_number,transfer_instructions,early_pay_bonus_pct").eq("workspace_id", ws).single();
       const base = {
         reference: order.reference,
         lines: quote.lines.map((l) => `${l.quantity} × ${l.name} @ ${formatNaira(l.unit_price_kobo)} = ${formatNaira(l.line_total_kobo)}`),
@@ -106,6 +110,12 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
           ...base,
           pay_by_transfer: { bank: bank.bank_name, account_number: bank.account_number, account_name: bank.account_name, narration: order.reference, extra: bank.transfer_instructions ?? undefined },
           minutes_to_pay: mins,
+          ...(order.early_total_kobo != null ? { early_payment: {
+            percent_saved: bank.early_pay_bonus_pct,
+            pay_amount: formatNaira(order.early_total_kobo),
+            full_amount: formatNaira(quote.total_kobo),
+            pay_within_minutes: mins,
+          } } : {}),
           next_step: "Give the customer these exact bank details, the exact total, and the reference to use as narration. Tell them they have the minutes_to_pay shown (a timer is on their screen), and that once paid they should tap the 📎 button in this chat to send a clear screenshot showing the amount, our account name/number, date and transaction reference.",
         };
       }
@@ -127,10 +137,10 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
 
 /** One customer message in, one assistant reply out. Tool loops are capped. */
 export async function runAgentTurn(args: {
-  agent: AgentRow; businessName: string; conversationId: string; history: Anthropic.MessageParam[]; userText: string;
+  agent: AgentRow; businessName: string; conversationId: string; history: Anthropic.MessageParam[]; userText: string; profile?: string;
 }): Promise<string> {
   const messages: Anthropic.MessageParam[] = [...args.history.slice(-AI.maxHistoryMessages), { role: "user", content: args.userText }];
-  const system = systemPrompt(args.agent, args.businessName);
+  const system = systemPrompt(args.agent, args.businessName, args.profile ?? "");
 
   for (let step = 0; step <= AI.maxToolCallsPerTurn; step++) {
     const res = await gatewayCall({

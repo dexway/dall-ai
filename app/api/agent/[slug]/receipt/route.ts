@@ -16,7 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const db = supabaseAdmin();
   const { data: order } = await db.from("orders")
-    .select("id,workspace_id,reference,total_kobo,created_at,status,expires_at,customer_approved_at")
+    .select("id,workspace_id,reference,total_kobo,early_total_kobo,created_at,status,expires_at,customer_approved_at")
     .eq("conversation_id", found.conv.id).in("status", ["awaiting_payment", "payment_rejected", "payment_failed"])
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!order) return NextResponse.json({ error: "There's no order waiting for payment in this chat. Ask the assistant to set one up first." }, { status: 409 });

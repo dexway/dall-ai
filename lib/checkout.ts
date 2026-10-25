@@ -6,7 +6,7 @@ export async function loadCheckout(token: string) {
   if (!/^[0-9a-f-]{36}$/i.test(token)) return null;
   const db = supabaseAdmin();
   const { data: order } = await db.from("orders")
-    .select("id,workspace_id,reference,status,subtotal_kobo,discount_kobo,total_kobo,currency,customer_approved_at,expires_at,created_at")
+    .select("id,workspace_id,reference,status,subtotal_kobo,discount_kobo,total_kobo,early_total_kobo,currency,customer_approved_at,expires_at,created_at")
     .eq("public_token", token).maybeSingle();
   if (!order) return null;
   const [{ data: items }, { data: ws }, { data: settings }, { data: secret }, { data: evidence }] = await Promise.all([

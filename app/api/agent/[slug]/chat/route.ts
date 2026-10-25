@@ -6,6 +6,7 @@ import { runAgentTurn } from "@/lib/ai/agent";
 import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
 import { findConversation, pendingOrder } from "@/lib/chat-session";
+import { profileText, type BusinessProfile } from "@/lib/business-profile";
 
 // Public web-widget endpoint. Anyone can chat; every reply is metered to the business that owns the agent.
 const Body = z.object({
@@ -21,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const { message } = parsed.data;
   const db = supabaseAdmin();
 
-  const { data: ws } = await db.from("workspaces").select("id,name,status").eq("slug", slug).maybeSingle();
+  const { data: ws } = await db.from("workspaces").select("id,name,status,business_profile").eq("slug", slug).maybeSingle();
   if (!ws || ws.status !== "active") return NextResponse.json({ error: "This assistant is not available." }, { status: 404 });
   const { data: agent } = await db.from("agents").select("id,workspace_id,name,role_title,persona,languages,greeting,max_discount_pct")
     .eq("workspace_id", ws.id).eq("active", true).order("created_at").limit(1).maybeSingle();
@@ -48,7 +49,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "user", content: { text: message } });
 
   try {
-    const reply = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: message });
+    const reply = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: message, profile: profileText(ws.business_profile as BusinessProfile) });
     await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "assistant", content: { text: reply } });
     return NextResponse.json({ reply, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
   } catch (e) {

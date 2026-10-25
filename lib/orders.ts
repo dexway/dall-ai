@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { buildQuote, orderReference, QuoteError, type CatalogueRow } from "@/lib/money";
 import { serverEnv } from "@/lib/env";
+import { earlyPayAmount } from "@/lib/early-pay";
 
 export type CheckoutInput = {
   workspaceId: string;
@@ -28,7 +29,7 @@ export async function createCheckout(input: CheckoutInput) {
   const basket = JSON.stringify([...quote.lines].sort((a, b) => a.item_id.localeCompare(b.item_id)).map((l) => [l.item_id, l.quantity]));
   const idem = createHash("sha256").update(`${input.conversationId ?? "direct"}|${basket}|${quote.discount_kobo}`).digest("hex").slice(0, 40);
 
-  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,status,expires_at")
+  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at")
     .eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).maybeSingle();
   if (existing.data) return { order: existing.data, quote, reused: true };
 
@@ -41,7 +42,10 @@ export async function createCheckout(input: CheckoutInput) {
     customerId = c?.id ?? null;
   }
 
-  const { data: settings } = await db.from("business_payment_settings").select("payment_deadline_hours,payment_window_minutes").eq("workspace_id", input.workspaceId).single();
+  const { data: settings } = await db.from("business_payment_settings").select("payment_deadline_hours,payment_window_minutes,early_pay_bonus_pct").eq("workspace_id", input.workspaceId).single();
+  // Early-payment bonus: only for chat orders (the timer is shown there), and only paid by transfer inside the countdown.
+  const earlyTotal = input.conversationId && (settings?.early_pay_bonus_pct ?? 0) > 0
+    ? earlyPayAmount(quote.total_kobo, settings!.early_pay_bonus_pct) : null;
   // Orders made in chat use the short transfer window (timer shown in the chat); others use the hours deadline.
   const windowMs = input.conversationId ? (settings?.payment_window_minutes ?? 60) * 60_000 : (settings?.payment_deadline_hours ?? 24) * 3600_000;
   const expires = new Date(Date.now() + windowMs).toISOString();
@@ -51,10 +55,10 @@ export async function createCheckout(input: CheckoutInput) {
     const { data: order, error: oErr } = await db.from("orders").insert({
       workspace_id: input.workspaceId, reference, customer_id: customerId, conversation_id: input.conversationId,
       status: "awaiting_payment", subtotal_kobo: quote.subtotal_kobo, discount_kobo: quote.discount_kobo,
-      total_kobo: quote.total_kobo, currency: quote.currency, expires_at: expires, idempotency_key: idem,
-    }).select("id,reference,public_token,total_kobo,status,expires_at").single();
+      total_kobo: quote.total_kobo, early_total_kobo: earlyTotal, currency: quote.currency, expires_at: expires, idempotency_key: idem,
+    }).select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").single();
     if (oErr?.code === "23505" && oErr.message.includes("idempotency")) {
-      const again = await db.from("orders").select("id,reference,public_token,total_kobo,status,expires_at").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
+      const again = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
       return { order: again.data!, quote, reused: true };
     }
     if (oErr?.code === "23505") continue; // reference collision, try another

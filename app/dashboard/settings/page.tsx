@@ -20,6 +20,7 @@ async function saveBank(formData: FormData) {
     transfer_instructions: String(formData.get("transfer_instructions") ?? "").trim() || null,
     payment_deadline_hours: Math.min(168, Math.max(1, Number(formData.get("payment_deadline_hours")) || 24)),
     payment_window_minutes: Math.min(1440, Math.max(5, Number(formData.get("payment_window_minutes")) || 60)),
+    early_pay_bonus_pct: Math.min(15, Math.max(0, Math.round(Number(formData.get("early_pay_bonus_pct")) || 0))),
     updated_at: new Date().toISOString(),
   }).eq("workspace_id", ctx.workspace.id);
   if (error) redirect("/dashboard/settings?error=save");
@@ -72,6 +73,21 @@ async function saveWhatsApp(formData: FormData) {
   redirect("/dashboard/settings?saved=whatsapp");
 }
 
+async function saveProfile(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/settings?error=role");
+  const field = (k: string) => String(formData.get(k) ?? "").trim().slice(0, 500) || undefined;
+  const profile = {
+    delivery_time: field("delivery_time"), opening_hours: field("opening_hours"), delivery_areas: field("delivery_areas"),
+    returns_policy: field("returns_policy"), notes: field("notes"),
+  };
+  const { error } = await ctx.db.from("workspaces").update({ business_profile: profile }).eq("id", ctx.workspace.id);
+  if (error) redirect("/dashboard/settings?error=save");
+  revalidatePath("/dashboard/settings");
+  redirect("/dashboard/settings?saved=profile");
+}
+
 export default async function Settings({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const ctx = await requireWorkspace();
   const sp = await searchParams;
@@ -81,6 +97,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const { data: wa } = await supabaseAdmin().from("channel_connections").select("external_id,display_name,status")
     .eq("workspace_id", ctx.workspace.id).eq("provider", "whatsapp").maybeSingle();
   const waCallback = `${serverEnv.siteUrl()}/api/webhooks/whatsapp`;
+  const { data: wsRow } = await ctx.db.from("workspaces").select("business_profile").eq("id", ctx.workspace.id).single();
+  const bp = (wsRow?.business_profile ?? {}) as Record<string, string | undefined>;
   const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", save: "Couldn't save. Try again.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
 
   return (
@@ -102,6 +120,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label className="field"><span>Extra instructions</span><textarea id="transfer_instructions" name="transfer_instructions" className="input" defaultValue={s?.transfer_instructions ?? ""} placeholder="Use your order reference as the narration." /></label>
           <label className="field"><span>Chat payment timer (minutes)</span><input id="payment_window_minutes" name="payment_window_minutes" type="number" min={5} max={1440} className="input" defaultValue={s?.payment_window_minutes ?? 60} />
             <small>After your assistant gives your bank details, the customer sees a countdown to pay and send their receipt.</small></label>
+          <label className="field"><span>Early-payment bonus (%)</span><input id="early_pay_bonus_pct" name="early_pay_bonus_pct" type="number" min={0} max={15} className="input" defaultValue={s?.early_pay_bonus_pct ?? 0} />
+            <small>Customers who pay inside the countdown get this percentage off. 0 turns it off. Max 15%.</small></label>
           <input type="hidden" name="payment_deadline_hours" value={s?.payment_deadline_hours ?? 24} />
           <div><button className="btn btn-ink">Save bank details</button></div>
         </form>
@@ -121,6 +141,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
 
       <form action={saveWhatsApp} className="panel" style={{ marginTop: 16 }}>
         <h2>WhatsApp</h2>
+        <p><a href="/dashboard/connect" className="btn btn-lime btn-sm">Connect with Meta (recommended)</a></p>
         <p style={{ color: "var(--ink-70)", fontSize: 14 }}>
           {wa ? <>Connected: number ID <b className="mono">{wa.external_id}</b>{wa.display_name ? <> ({wa.display_name})</> : null}. Enter a token below to replace it.</>
             : <>Not connected yet. Customers who message your WhatsApp number will be answered by your assistant.</>}
@@ -134,6 +155,17 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         <div className="field"><span>Callback URL (paste into Meta → WhatsApp → Configuration)</span><code className="input mono" style={{ overflowWrap: "anywhere", display: "block" }}>{waCallback}</code>
           <small>Meta also asks for a verify token. Your developer sets it as WHATSAPP_VERIFY_TOKEN.</small></div>
         <div><button className="btn btn-ink">Save WhatsApp</button></div>
+      </form>
+
+      <form action={saveProfile} className="panel" style={{ marginTop: 16 }}>
+        <h2>About your business</h2>
+        <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Your assistant answers customers from this. Fill in what customers ask most. Anything left blank, the assistant will say the team will confirm.</p>
+        <label className="field"><span>Usual delivery time</span><textarea name="delivery_time" className="input" defaultValue={bp.delivery_time ?? ""} placeholder="e.g. Same day for Lekki and VI if ordered before 2pm; 1–2 days for the mainland" /></label>
+        <label className="field"><span>Opening hours</span><input name="opening_hours" className="input" defaultValue={bp.opening_hours ?? ""} placeholder="e.g. Mon–Sat 9am–7pm, Sunday closed" /></label>
+        <label className="field"><span>Where you deliver</span><textarea name="delivery_areas" className="input" defaultValue={bp.delivery_areas ?? ""} placeholder="Areas in Lagos, and whether you ship to other states" /></label>
+        <label className="field"><span>Returns and damaged items</span><textarea name="returns_policy" className="input" defaultValue={bp.returns_policy ?? ""} placeholder="e.g. Damaged items replaced within 24 hours with a photo" /></label>
+        <label className="field"><span>Anything else customers ask about</span><textarea name="notes" className="input" defaultValue={bp.notes ?? ""} placeholder="Minimum order, packaging, payment questions" /></label>
+        <div><button className="btn btn-ink">Save business details</button></div>
       </form>
     </>
   );

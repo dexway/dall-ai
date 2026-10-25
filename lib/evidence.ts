@@ -2,6 +2,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { extractReceipt, receiptFlags } from "@/lib/ai/receipt";
 import { GatewayError } from "@/lib/ai/gateway";
+import { acceptableAmounts } from "@/lib/early-pay";
 
 export const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
 export const RECEIPT_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
@@ -10,7 +11,7 @@ export class EvidenceError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-type OrderRow = { id: string; workspace_id: string; reference: string; total_kobo: number; created_at: string; status: string; expires_at: string | null; customer_approved_at: string | null };
+type OrderRow = { id: string; workspace_id: string; reference: string; total_kobo: number; early_total_kobo: number | null; created_at: string; status: string; expires_at: string | null; customer_approved_at: string | null };
 
 /**
  * Stores a transfer receipt, reads it (guide only), flags mismatches and queues it for a person.
@@ -37,7 +38,11 @@ export async function submitEvidence(order: OrderRow, file: File): Promise<{ fla
   try {
     const fields = await extractReceipt({ workspaceId: order.workspace_id, mediaType: file.type, base64: buf.toString("base64") });
     extracted = fields;
-    flags = receiptFlags(fields, { amount_kobo: order.total_kobo, account_number: bank?.account_number, account_name: bank?.account_name, reference: order.reference, created_at: order.created_at });
+    // Judge the receipt against whichever amount it best matches: the full total, or the early-payment amount while the timer runs.
+    const options = acceptableAmounts(order, new Date()).map((amount_kobo) => receiptFlags(fields, {
+      amount_kobo, account_number: bank?.account_number, account_name: bank?.account_name, reference: order.reference, created_at: order.created_at,
+    }));
+    flags = options.sort((a, b) => a.length - b.length)[0];
   } catch (e) {
     if (!(e instanceof GatewayError)) console.error("[evidence] receipt read failed", (e as Error).message);
     flags = ["not_auto_read"];

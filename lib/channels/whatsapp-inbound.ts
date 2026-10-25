@@ -5,6 +5,7 @@ import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
 import { decryptSecret } from "@/lib/crypto";
 import { sendText, type Inbound } from "@/lib/channels/whatsapp-parse";
+import { profileText, type BusinessProfile } from "@/lib/business-profile";
 
 const UNSUPPORTED = "I can read text messages for now. Please type your question, and I will help you.";
 const RESTING = "Sorry, this assistant is resting right now. Please contact the business directly.";
@@ -22,7 +23,7 @@ export async function handleWhatsAppInbound(msg: Inbound): Promise<void> {
     .eq("workspace_id", conn.workspace_id).eq("external_id", msg.messageId).maybeSingle();
   if (dup) return;
 
-  const { data: ws } = await db.from("workspaces").select("id,name,status").eq("id", conn.workspace_id).maybeSingle();
+  const { data: ws } = await db.from("workspaces").select("id,name,status,business_profile").eq("id", conn.workspace_id).maybeSingle();
   if (!ws || ws.status !== "active") return;
   const token = decryptSecret(conn.access_token_enc);
   const reply = (text: string) => sendText({ accessToken: token, phoneNumberId: msg.phoneNumberId, to: msg.from, text });
@@ -54,7 +55,7 @@ export async function handleWhatsAppInbound(msg: Inbound): Promise<void> {
 
   let text: string;
   try {
-    text = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: msg.text });
+    text = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: msg.text, profile: profileText(ws.business_profile as BusinessProfile) });
   } catch (e) {
     if (e instanceof GatewayError) text = e.status === 402 || e.status === 403 ? RESTING : e.message;
     else throw e;
