@@ -24,7 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const { data: ws } = await db.from("workspaces").select("id,name,status,business_profile").eq("slug", slug).maybeSingle();
   if (!ws || ws.status !== "active") return NextResponse.json({ error: "This assistant is not available." }, { status: 404 });
-  const { data: agent } = await db.from("agents").select("id,workspace_id,name,role_title,persona,languages,greeting,max_discount_pct")
+  const { data: agent } = await db.from("agents").select("id,workspace_id,name,role_title,persona,languages,greeting,max_discount_pct,instructions,knowledge")
     .eq("workspace_id", ws.id).eq("active", true).order("created_at").limit(1).maybeSingle();
   if (!agent) return NextResponse.json({ error: "This assistant is not available." }, { status: 404 });
 

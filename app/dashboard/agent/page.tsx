@@ -1,16 +1,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireWorkspace, canManage } from "@/lib/workspace";
-import { publicAssetUrl } from "@/lib/supabase/server";
+import { publicAssetUrl, supabaseAdmin } from "@/lib/supabase/server";
+import { BUILTIN_PRESETS } from "@/lib/presets";
+import Studio from "./Studio";
 import LaunchKit from "./LaunchKit";
 
-export const metadata = { title: "Assistant & launch kit" };
+export const metadata = { title: "Assistant studio" };
 
 const LANGS = ["English", "Pidgin", "Yorùbá", "Igbo", "Hausa"];
-const VOICES = [
-  { id: "lagos-english", label: "Lagos English" }, { id: "pidgin", label: "Pidgin" },
-  { id: "yoruba", label: "Yorùbá" }, { id: "igbo", label: "Igbo" }, { id: "hausa", label: "Hausa" },
-];
+const VOICES = ["lagos-english", "pidgin", "yoruba", "igbo", "hausa"];
 const MAX_IMG = 4 * 1024 * 1024;
 
 async function save(formData: FormData) {
@@ -21,13 +20,16 @@ async function save(formData: FormData) {
   const id = String(formData.get("id"));
   const langs = LANGS.filter((l) => formData.get(`lang_${l}`));
   const color = String(formData.get("accent_color") ?? "#C8EE72");
+  const website = String(formData.get("website_url") ?? "").trim().slice(0, 300);
   const update: Record<string, unknown> = {
     name: String(formData.get("name") ?? "").trim().slice(0, 40) || "Amaka",
     role_title: String(formData.get("role_title") ?? "").trim().slice(0, 60) || "Sales & support assistant",
     persona: String(formData.get("persona") ?? "").trim().slice(0, 600),
     greeting: String(formData.get("greeting") ?? "").trim().slice(0, 300),
+    instructions: String(formData.get("instructions") ?? "").trim().slice(0, 4000),
+    website_url: website || null,
     languages: langs.length ? langs : ["English"],
-    voice_style: VOICES.some((v) => v.id === formData.get("voice_style")) ? formData.get("voice_style") : "lagos-english",
+    voice_style: VOICES.includes(String(formData.get("voice_style"))) ? formData.get("voice_style") : "lagos-english",
     accent_color: /^#[0-9a-f]{6}$/i.test(color) ? color : "#C8EE72",
     max_discount_pct: Math.min(50, Math.max(0, Number(formData.get("max_discount_pct") ?? 0) || 0)),
     updated_at: new Date().toISOString(),
@@ -57,64 +59,81 @@ async function save(formData: FormData) {
   redirect("/dashboard/agent?saved=1");
 }
 
+// Reads the business's website and stores a plain-text summary as the agent's knowledge.
+async function learnFromWebsite(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/agent?error=role");
+  const url = String(formData.get("website_url") ?? "").trim();
+  let host = "";
+  try { host = new URL(url).hostname; } catch { redirect("/dashboard/agent?error=url"); }
+  if (!/^https?:$/i.test(new URL(url).protocol) || /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|0\.|::1|\[)/i.test(host)) redirect("/dashboard/agent?error=url");
+
+  let text = "";
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "DallAI-bot/1.0" }, signal: AbortSignal.timeout(10000) });
+    const html = (await res.text()).slice(0, 400000);
+    text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
+  } catch { redirect("/dashboard/agent?error=fetch"); }
+  if (!text) redirect("/dashboard/agent?error=fetch");
+
+  await supabaseAdmin().from("agents").update({ website_url: url.slice(0, 300), knowledge: `From ${url}:\n${text}` })
+    .eq("workspace_id", ctx.workspace.id);
+  revalidatePath("/dashboard/agent");
+  redirect("/dashboard/agent?saved=learned");
+}
+
+async function saveAsPreset(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/agent?error=role");
+  const name = String(formData.get("preset_name") ?? "").trim().slice(0, 40);
+  if (!name) redirect("/dashboard/agent?error=save");
+  await supabaseAdmin().from("agent_presets").insert({
+    workspace_id: ctx.workspace.id, name,
+    persona: String(formData.get("persona") ?? "").slice(0, 600),
+    greeting: String(formData.get("greeting") ?? "").slice(0, 300),
+    instructions: String(formData.get("instructions") ?? "").slice(0, 4000),
+  });
+  revalidatePath("/dashboard/agent");
+  redirect("/dashboard/agent?saved=preset");
+}
+
 export default async function AgentPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const ctx = await requireWorkspace();
   const sp = await searchParams;
-  const { data: a } = await ctx.db.from("agents").select("*").eq("workspace_id", ctx.workspace.id).order("created_at").limit(1).single();
+  const [{ data: a }, { data: presetRows }] = await Promise.all([
+    ctx.db.from("agents").select("*").eq("workspace_id", ctx.workspace.id).order("created_at").limit(1).single(),
+    ctx.db.from("agent_presets").select("id,name,persona,greeting,instructions").eq("workspace_id", ctx.workspace.id).order("created_at", { ascending: false }),
+  ]);
   if (!a) return <div className="panel">No assistant found.</div>;
   const avatarUrl = publicAssetUrl(a.avatar_path);
   const images = (a.image_paths as string[]).map((p) => publicAssetUrl(p)!);
-  const errors: Record<string, string> = { role: "Only owners and admins can change the assistant.", image: "Images must be PNG, JPG or WEBP under 4 MB.", upload: "An image failed to upload. Try again.", save: "Couldn't save. Try again." };
+  const customPresets = (presetRows ?? []).map((p) => ({ key: p.id, label: p.name, emoji: "⭐", persona: p.persona, greeting: p.greeting, instructions: p.instructions }));
+  const errors: Record<string, string> = { role: "Only owners and admins can change the assistant.", image: "Images must be PNG, JPG or WEBP under 4 MB.", upload: "An image failed to upload. Try again.", save: "Couldn't save. Try again.", url: "That website link doesn't look right. Use a full address like https://yourshop.com.", fetch: "Couldn't read that website. Check the link is public and try again." };
+  const saved: Record<string, string> = { "1": "Saved. Your assistant uses these settings from the next message.", learned: "Read your website. Check the Knowledge box and edit anything that's off.", preset: "Preset saved. It's in your preset list above." };
 
   return (
     <>
       <div className="page-head">
-        <div><h1>{sp.welcome ? "Meet your assistant" : "Assistant & launch kit"}</h1><p>Give it a name, a face and a way of talking. Customers see this everywhere it replies.</p></div>
+        <div><h1>Assistant studio</h1><p>Build your AI assistant: start from a preset, give it a personality and a brain, teach it from your website, and launch it everywhere.</p></div>
         <a className="btn btn-line" href={`/chat/${ctx.workspace.slug}`} target="_blank" rel="noreferrer">Test the chat ↗</a>
       </div>
-      {sp.saved && <div className="notice notice-ok" role="status">Saved. Your assistant uses these settings from the next message.</div>}
+      {sp.saved && saved[sp.saved] && <div className="notice notice-ok" role="status">{saved[sp.saved]}</div>}
       {sp.error && <div className="notice notice-bad" role="alert">{errors[sp.error] ?? "Something went wrong."}</div>}
 
-      <div className="two">
-        <form action={save} className="panel">
-          <input type="hidden" name="id" value={a.id} />
-          <h2>Identity</h2>
-          <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-            {avatarUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={avatarUrl} alt="" className="thumb" style={{ width: 64, height: 64, borderRadius: "50%" }} />
-              : <span className="thumb" style={{ width: 64, height: 64, borderRadius: "50%", display: "grid", placeItems: "center", background: a.accent_color, fontWeight: 800, fontSize: 24 }}>{a.name[0]}</span>}
-            <label className="field" style={{ flex: 1 }}><span>Face / avatar</span><input id="avatar" type="file" name="avatar" accept="image/png,image/jpeg,image/webp" className="input" /></label>
-          </div>
-          <div className="form-grid">
-            <label className="field"><span>Name</span><input id="name" name="name" className="input" defaultValue={a.name} maxLength={40} required /></label>
-            <label className="field"><span>Job title</span><input id="role_title" name="role_title" className="input" defaultValue={a.role_title} maxLength={60} /></label>
-          </div>
-          <label className="field"><span>Personality</span><textarea id="persona" name="persona" className="input" defaultValue={a.persona} maxLength={600} /><small>How it talks. e.g. &quot;Warm and quick, a little playful, calls customers &apos;dear&apos;.&quot;</small></label>
-          <label className="field"><span>First greeting</span><input id="greeting" name="greeting" className="input" defaultValue={a.greeting} maxLength={300} /></label>
-          <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}><span>Replies in</span>
-            <div className="row-actions">{LANGS.map((l) => (
-              <label key={l} className="chip" style={{ cursor: "pointer" }}><input id={`lang_${l}`} type="checkbox" name={`lang_${l}`} defaultChecked={a.languages.includes(l)} /> {l}</label>
-            ))}</div>
-            <small>English and Pidgin read naturally. Ask a native speaker to check Yorùbá, Igbo or Hausa greetings before launch.</small>
-          </fieldset>
-          <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}><span>Voice for calls & voice notes</span>
-            <div className="row-actions">{VOICES.map((v) => (
-              <label key={v.id} className="chip" style={{ cursor: "pointer" }}><input id={`voice_${v.id}`} type="radio" name="voice_style" value={v.id} defaultChecked={a.voice_style === v.id} /> {v.label}</label>
-            ))}</div>
-            <small>Used once a voice channel is connected.</small>
-          </fieldset>
-          <div className="form-grid">
-            <label className="field"><span>Brand colour</span><input id="accent_color" type="color" name="accent_color" defaultValue={a.accent_color} className="input" style={{ padding: 4 }} /></label>
-            <label className="field"><span>Max discount it may give (%)</span><input id="max_discount_pct" type="number" name="max_discount_pct" min={0} max={50} step={1} defaultValue={a.max_discount_pct} className="input" /><small>Above this, it passes the request to you.</small></label>
-          </div>
-          <label className="field"><span>Your photos for the launch kit (up to 6)</span><input id="images" type="file" name="images" accept="image/png,image/jpeg,image/webp" multiple className="input" /></label>
-          <button className="btn btn-ink">Save assistant</button>
-        </form>
+      <Studio
+        agent={{ id: a.id, name: a.name, role_title: a.role_title, persona: a.persona, greeting: a.greeting, instructions: a.instructions ?? "", website_url: a.website_url ?? null, knowledge: a.knowledge ?? "", accent_color: a.accent_color, max_discount_pct: Number(a.max_discount_pct), languages: a.languages, voice_style: a.voice_style }}
+        avatarUrl={avatarUrl} builtinPresets={BUILTIN_PRESETS} customPresets={customPresets}
+        save={save} learnFromWebsite={learnFromWebsite} saveAsPreset={saveAsPreset}
+      />
 
+      <section className="panel" style={{ marginTop: 16 }}>
+        <h2>Launch kit</h2>
         <LaunchKit agent={{ name: a.name, role: a.role_title, color: a.accent_color, avatar: avatarUrl, languages: a.languages }}
           business={ctx.workspace.name} slug={ctx.workspace.slug} images={images} />
-      </div>
+      </section>
     </>
   );
 }

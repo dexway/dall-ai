@@ -9,6 +9,7 @@ import { createCheckout, checkoutUrl } from "@/lib/orders";
 export type AgentRow = {
   id: string; workspace_id: string; name: string; role_title: string; persona: string;
   languages: string[]; greeting: string; max_discount_pct: number;
+  instructions?: string; knowledge?: string;
 };
 
 const STATUS_WORDS: Record<string, string> = {
@@ -55,6 +56,8 @@ Languages: reply in whichever of ${agent.languages.join(", ")} the customer uses
 
 About this business (answer delivery, hours and policy questions from this. If a detail is not listed, say the team will confirm it):
 ${profile || "- Not filled in yet. If asked about delivery times or hours, say the team will confirm."}
+${agent.instructions ? `\nHow the owner wants you to work (follow this closely):\n${agent.instructions}` : ""}
+${agent.knowledge ? `\nBusiness knowledge (use to answer questions; never invent beyond it):\n${agent.knowledge}` : ""}
 
 Rules you never break:
 - Only quote products, services and prices returned by search_catalogue. Never invent an item, price, bonus or promotion.
