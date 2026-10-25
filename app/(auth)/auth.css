@@ -1,4 +1,4 @@
-.auth { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); }
+.auth { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); }
 .auth-side { background: var(--ink); color: var(--mint); padding: 48px var(--gutter-r) 48px var(--gutter-l); display: flex; flex-direction: column; justify-content: space-between; gap: 32px; position: relative; overflow: hidden; }
 .auth-side::after { content: ""; position: absolute; inset: auto -20% -30% auto; width: 420px; height: 420px; border-radius: 50%; background: radial-gradient(circle, rgba(200, 238, 114, .25), transparent 65%); }
 .auth-side h2 { font-size: clamp(30px, 3.4vw, 44px); color: var(--white); font-weight: 800; }
