@@ -63,27 +63,29 @@ export default function Landing() {
                 <span className="agent-pill glass"><span className="avatar">A</span>Amaka · Mama Put Kitchen</span>
                 <span className="live">LIVE ON WHATSAPP</span>
               </div>
-              <div className="bubble me glass"><span className="avatar" style={{ background: "var(--coral)" }}>T</span>
-                <span><span className="who">Tunde · 07:42</span>Abeg, I need jollof for 40 people this Saturday. Wetin be the price?</span>
-              </div>
-              <div className="bubble ai glass">
-                <span className="who">Amaka · AI assistant</span>
-                Good morning Tunde! For 40 guests, these two fit well:
-                <div className="cards">
-                  <div className="pcard"><div className="swatch" /><b>Party jollof cooler</b><span className="mono">₦85,000</span><br />serves 40</div>
-                  <div className="pcard"><div className="swatch" /><b>Jollof + chicken trays</b><span className="mono">₦140,000</span><br />4 × 10 trays</div>
-                </div>
-              </div>
-              <div className="bubble me glass"><span className="avatar" style={{ background: "var(--coral)" }}>T</span>
-                <span>The trays. I go pay transfer.</span>
-              </div>
-              <div className="bubble ai glass">
-                <span className="who">Amaka · AI assistant</span>
-                Done ✓ Order <span className="mono">MAM-7KQ2X9PD</span>, total <b className="mono">₦140,000</b>. Review and pay here: dall.ai/pay/…
-              </div>
-              <div className="receipt-row">
-                <span className="chip chip-glass">Receipt uploaded</span>
-                <span className="chip chip-lime">Amount matches · waiting for your OK</span>
+              <div className="chat-loop">
+                <div className="msg-row m1"><div className="bubble me glass"><span className="avatar" style={{ background: "var(--coral)" }}>T</span>
+                  <span><span className="who">Tunde · 07:42</span>Abeg, I need jollof for 40 people this Saturday. Wetin be the price?</span></div></div>
+                <div className="msg-row t1" aria-hidden><div className="typing-dots glass"><i /><i /><i /></div></div>
+                <div className="msg-row m2"><div className="bubble ai glass">
+                  <span className="who">Amaka · AI assistant</span>
+                  Good morning Tunde! For 40 guests, these two fit well:
+                  <div className="cards">
+                    <div className="pcard"><div className="swatch" /><b>Party jollof cooler</b><span className="mono">₦85,000</span><br />serves 40</div>
+                    <div className="pcard"><div className="swatch" /><b>Jollof + chicken trays</b><span className="mono">₦140,000</span><br />4 × 10 trays</div>
+                  </div>
+                </div></div>
+                <div className="msg-row m3"><div className="bubble me glass"><span className="avatar" style={{ background: "var(--coral)" }}>T</span>
+                  <span>The trays. I go pay transfer.</span></div></div>
+                <div className="msg-row t2" aria-hidden><div className="typing-dots glass"><i /><i /><i /></div></div>
+                <div className="msg-row m4"><div className="bubble ai glass">
+                  <span className="who">Amaka · AI assistant</span>
+                  Done ✓ Order <span className="mono">MAM-7KQ2X9PD</span>, total <b className="mono">₦140,000</b>. Review and pay here: dall.ai/pay/…
+                </div></div>
+                <div className="msg-row m5"><div className="receipt-row">
+                  <span className="chip chip-glass">Receipt uploaded</span>
+                  <span className="chip chip-lime">Amount matches · waiting for your OK</span>
+                </div></div>
               </div>
               <div className="ask glass"><span>Ask Amaka anything…</span><span className="send" aria-hidden>↑</span></div>
             </div>
