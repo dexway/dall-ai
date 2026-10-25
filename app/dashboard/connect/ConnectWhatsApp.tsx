@@ -18,7 +18,7 @@ export default function ConnectWhatsApp({ appId, configId, action }: {
 
   useEffect(() => {
     window.fbAsyncInit = () => {
-      window.FB?.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v21.0" });
+      window.FB?.init({ appId, autoLogAppEvents: true, xfbml: false, version: "v26.0" });
       setReady(true);
     };
     if (window.FB) setReady(true);

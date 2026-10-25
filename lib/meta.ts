@@ -1,7 +1,7 @@
 import "server-only";
 
 // Meta Graph API calls for Embedded Signup (a business connects its own WhatsApp number through Meta's login).
-const graph = () => `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v21.0"}`;
+const graph = () => `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v26.0"}`;
 
 function need(name: string): string {
   const v = process.env[name];

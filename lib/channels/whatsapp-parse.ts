@@ -39,7 +39,7 @@ export function parseInbound(body: unknown): Inbound[] {
 
 /** Sends a plain text reply through the Cloud API. Only used inside the 24-hour window after a customer message. */
 export async function sendText(args: { accessToken: string; phoneNumberId: string; to: string; text: string }): Promise<void> {
-  const graph = process.env.WHATSAPP_GRAPH_VERSION || "v21.0";
+  const graph = process.env.WHATSAPP_GRAPH_VERSION || "v26.0";
   const res = await fetch(`https://graph.facebook.com/${graph}/${args.phoneNumberId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bearer ${args.accessToken}`, "Content-Type": "application/json" },
