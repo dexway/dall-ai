@@ -12,5 +12,5 @@ export type Partner = {
 export const PARTNERS_HEADING = "Trusted by";
 
 export const PARTNERS: Partner[] = [
-  { name: "Ekomedia", logo: "/partners/ekomedia-white.png", width: 794, height: 216, href: "https://ekomediawebsiteonline.web.app" },
+  { name: "Ekomedia", logo: "/partners/ekomedia-white.svg", width: 794, height: 216, href: "https://ekomediawebsiteonline.web.app" },
 ];
