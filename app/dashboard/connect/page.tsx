@@ -275,7 +275,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
   // The "not connected" hero for a channel.
   const connectHero = (def: ChannelDef) => (
     <div className="panel" style={{ textAlign: "center", padding: "48px 24px" }}>
-      <div style={{ display: "inline-grid", placeItems: "center", width: 120, height: 120, borderRadius: 36, background: `${def.color}22`, marginBottom: 18 }}>
+      <div style={{ display: "grid", placeItems: "center", width: 120, height: 120, borderRadius: 36, background: `${def.color}22`, margin: "0 auto 18px" }}>
         <Icon ch={def} size={72} />
       </div>
       <h2 style={{ margin: "0 0 8px" }}>{def.headline}</h2>
