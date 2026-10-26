@@ -259,9 +259,9 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
         </Row>
         {isMeta && (
           <Row label="Refresh permissions" help={def.provider === "instagram"
-            ? "Your Instagram is connected through the Facebook Page it's linked to, so refreshing opens a Facebook login — that's expected. Pick the same Page and keep every permission ticked."
-            : "Meta can unexpectedly drop a connection. If replies stop sending or settings won't save, refresh permissions first — it takes one Facebook login."}>
-            <a href="/api/meta/facebook/start" className="btn btn-line btn-sm">{def.provider === "instagram" ? "Refresh via Facebook" : "Refresh permissions"}</a>
+            ? "Instagram connects through Meta for Business, the same way ManyChat does: one Meta screen where you pick your Business, the Page and the Instagram account linked to it. Keep every permission ticked."
+            : "Meta can unexpectedly drop a connection. If replies stop sending or settings won't save, refresh through Meta first — it takes one login."}>
+            <a href="/api/meta/facebook/start" className="btn btn-line btn-sm">Refresh via Meta</a>
           </Row>
         )}
         <Row label="Disconnect" help="Removes the saved access so your assistant stops replying here at once. You can reconnect any time.">
@@ -290,7 +290,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
                 <Link href="/dashboard/settings" className="btn btn-lime">Connect with a number ID</Link>
                 <small style={{ color: "var(--ink-70)" }}>One-click WhatsApp signup turns on once Meta confirms Dall AI as a Tech Provider.</small>
               </div>)
-        : <a href="/api/meta/facebook/start" className="btn btn-lime">Connect with Facebook</a>}
+        : <a href="/api/meta/facebook/start" className="btn btn-lime">Connect via Meta</a>}
     </div>
   );
 
