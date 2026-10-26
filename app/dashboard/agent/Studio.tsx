@@ -14,10 +14,11 @@ const VOICES = [
   { id: "yoruba", label: "Yorùbá" }, { id: "igbo", label: "Igbo" }, { id: "hausa", label: "Hausa" },
 ];
 
-export default function Studio({ agent, avatarUrl, builtinPresets, customPresets, save, learnFromWebsite, saveAsPreset }: {
+export default function Studio({ agent, avatarUrl, builtinPresets, customPresets, save, learnFromWebsite, saveAsPreset, addKnowledgeFiles, clearKnowledge }: {
   agent: Agent; avatarUrl: string | null;
   builtinPresets: Preset[]; customPresets: Preset[];
   save: (f: FormData) => void; learnFromWebsite: (f: FormData) => void; saveAsPreset: (f: FormData) => void;
+  addKnowledgeFiles: (f: FormData) => void; clearKnowledge: () => void;
 }) {
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState(agent.role_title);
@@ -106,11 +107,24 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
               <input name="website_url" className="input" type="url" placeholder="https://yourbusiness.com" value={website} onChange={(e) => setWebsite(e.target.value)} />
               <button className="btn btn-lime btn-sm" disabled={!website}>Learn from my website</button>
             </form>
-            {agent.knowledge && <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Learned so far</div>
-              <div style={{ fontSize: 13, color: "var(--ink-70)", maxHeight: 120, overflow: "auto", border: "1px solid var(--line,#e5e5e5)", borderRadius: 8, padding: 8, marginTop: 4, whiteSpace: "pre-wrap" }}>{agent.knowledge.slice(0, 600)}{agent.knowledge.length > 600 ? "…" : ""}</div>
-            </div>}
           </section>
+
+          <section className="panel">
+            <h2>Upload price lists &amp; documents</h2>
+            <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Add PDFs, Word (.docx), text or CSV files — menus, price lists, policies, FAQs. Dall AI reads them into your assistant&rsquo;s memory.</p>
+            <form action={addKnowledgeFiles} style={{ display: "grid", gap: 8 }}>
+              <input name="docs" type="file" multiple accept=".pdf,.docx,.txt,.csv,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/csv" className="input" required />
+              <button className="btn btn-lime btn-sm">Add to memory</button>
+              <small style={{ color: "var(--ink-70)" }}>Up to 5 files, 10 MB each. Scanned images can&rsquo;t be read — type those details into the Knowledge box.</small>
+            </form>
+          </section>
+
+          {agent.knowledge && <section className="panel">
+            <h2>What it has learned</h2>
+            <div style={{ fontSize: 13, color: "var(--ink-70)", maxHeight: 220, overflow: "auto", border: "1px solid var(--line,#e5e5e5)", borderRadius: 8, padding: 10, whiteSpace: "pre-wrap" }}>{agent.knowledge.slice(0, 3000)}{agent.knowledge.length > 3000 ? "…" : ""}</div>
+            <p style={{ fontSize: 12, color: "var(--ink-70)", marginTop: 6 }}>{agent.knowledge.length.toLocaleString()} characters from your website and documents. Prices still come only from your Catalogue.</p>
+            <form action={clearKnowledge}><button className="btn btn-ghost btn-sm" style={{ color: "var(--bad, #b00)" }}>Clear learned knowledge</button></form>
+          </section>}
 
           <section className="panel">
             <h2>Save as a preset</h2>

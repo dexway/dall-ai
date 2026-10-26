@@ -138,6 +138,8 @@ export async function launchClickToChatAd(args: {
 
   const campaign = await adPost(args.adAccountId, "campaigns", args.token, {
     name: args.name, objective: "OUTCOME_ENGAGEMENT", special_ad_categories: [], status: "PAUSED",
+    // Budget lives on the ad set, so ad sets don't share a campaign budget. Meta requires this field.
+    is_adset_budget_sharing_enabled: false,
   });
 
   const adset = await adPost(args.adAccountId, "adsets", args.token, {

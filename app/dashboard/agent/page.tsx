@@ -3,8 +3,12 @@ import { redirect } from "next/navigation";
 import { requireWorkspace, canManage } from "@/lib/workspace";
 import { publicAssetUrl, supabaseAdmin } from "@/lib/supabase/server";
 import { BUILTIN_PRESETS } from "@/lib/presets";
+import { extractText } from "@/lib/extract";
 import Studio from "./Studio";
 import LaunchKit from "./LaunchKit";
+
+const KNOWLEDGE_CAP = 16000;
+const MAX_DOC = 10 * 1024 * 1024;
 
 export const metadata = { title: "Assistant studio" };
 
@@ -84,6 +88,41 @@ async function learnFromWebsite(formData: FormData) {
   redirect("/dashboard/agent?saved=learned");
 }
 
+// Reads uploaded PDFs, Word docs, text or CSV files and adds their text to the agent's knowledge.
+async function addKnowledgeFiles(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/agent?error=role");
+  const files = formData.getAll("docs").filter((f): f is File => f instanceof File && f.size > 0).slice(0, 5);
+  if (!files.length) redirect("/dashboard/agent?error=nofile");
+
+  const sections: string[] = [];
+  for (const f of files) {
+    if (f.size > MAX_DOC) redirect("/dashboard/agent?error=big");
+    let text = "";
+    try { text = await extractText(f.name, f.type, await f.arrayBuffer()); }
+    catch { redirect("/dashboard/agent?error=doctype"); }
+    if (text) sections.push(`From ${f.name}:\n${text.slice(0, 8000)}`);
+  }
+  if (!sections.length) redirect("/dashboard/agent?error=empty");
+
+  const db = supabaseAdmin();
+  const { data: cur } = await db.from("agents").select("knowledge").eq("workspace_id", ctx.workspace.id).order("created_at").limit(1).single();
+  const merged = [cur?.knowledge?.trim(), ...sections].filter(Boolean).join("\n\n").slice(0, KNOWLEDGE_CAP);
+  await db.from("agents").update({ knowledge: merged }).eq("workspace_id", ctx.workspace.id);
+  revalidatePath("/dashboard/agent");
+  redirect("/dashboard/agent?saved=docs");
+}
+
+async function clearKnowledge() {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) redirect("/dashboard/agent?error=role");
+  await supabaseAdmin().from("agents").update({ knowledge: "" }).eq("workspace_id", ctx.workspace.id);
+  revalidatePath("/dashboard/agent");
+  redirect("/dashboard/agent?saved=cleared");
+}
+
 async function saveAsPreset(formData: FormData) {
   "use server";
   const ctx = await requireWorkspace();
@@ -111,8 +150,8 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
   const avatarUrl = publicAssetUrl(a.avatar_path);
   const images = (a.image_paths as string[]).map((p) => publicAssetUrl(p)!);
   const customPresets = (presetRows ?? []).map((p) => ({ key: p.id, label: p.name, emoji: "⭐", persona: p.persona, greeting: p.greeting, instructions: p.instructions }));
-  const errors: Record<string, string> = { role: "Only owners and admins can change the assistant.", image: "Images must be PNG, JPG or WEBP under 4 MB.", upload: "An image failed to upload. Try again.", save: "Couldn't save. Try again.", url: "That website link doesn't look right. Use a full address like https://yourshop.com.", fetch: "Couldn't read that website. Check the link is public and try again." };
-  const saved: Record<string, string> = { "1": "Saved. Your assistant uses these settings from the next message.", learned: "Read your website. Check the Knowledge box and edit anything that's off.", preset: "Preset saved. It's in your preset list above." };
+  const errors: Record<string, string> = { role: "Only owners and admins can change the assistant.", image: "Images must be PNG, JPG or WEBP under 4 MB.", upload: "An image failed to upload. Try again.", save: "Couldn't save. Try again.", url: "That website link doesn't look right. Use a full address like https://yourshop.com.", fetch: "Couldn't read that website. Check the link is public and try again.", nofile: "Choose a file to upload first.", big: "Each file must be under 10 MB.", doctype: "Use PDF, Word (.docx), text or CSV files. Old .doc files should be saved as .docx or PDF.", empty: "Couldn't find any text in that file. If it's a scanned image, type the details into the Knowledge box instead." };
+  const saved: Record<string, string> = { "1": "Saved. Your assistant uses these settings from the next message.", learned: "Read your website. Check the Knowledge box and edit anything that's off.", preset: "Preset saved. It's in your preset list above.", docs: "Added your document to the assistant's memory.", cleared: "Cleared the learned knowledge." };
 
   return (
     <>
@@ -127,6 +166,7 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
         agent={{ id: a.id, name: a.name, role_title: a.role_title, persona: a.persona, greeting: a.greeting, instructions: a.instructions ?? "", website_url: a.website_url ?? null, knowledge: a.knowledge ?? "", accent_color: a.accent_color, max_discount_pct: Number(a.max_discount_pct), languages: a.languages, voice_style: a.voice_style }}
         avatarUrl={avatarUrl} builtinPresets={BUILTIN_PRESETS} customPresets={customPresets}
         save={save} learnFromWebsite={learnFromWebsite} saveAsPreset={saveAsPreset}
+        addKnowledgeFiles={addKnowledgeFiles} clearKnowledge={clearKnowledge}
       />
 
       <div style={{ marginTop: 16 }}>
