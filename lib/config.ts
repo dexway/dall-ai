@@ -16,6 +16,12 @@ export const AI = {
   maxUserMessageChars: 2_000,
 };
 
+/**
+ * Free early access: while on, assistants reply without spending or needing credits, and no plan is
+ * required. Usage is still logged so we can see AI cost. Set DALL_FREE_MODE=false to start billing.
+ */
+export const freeMode = () => process.env.DALL_FREE_MODE !== "false";
+
 /** Credit packs a business can buy (platform billing, not the business's own sales). */
 export const TOP_UPS = [
   // 1 credit costs Dall AI ~$0.01 of Claude usage (rate card credits_per_usd = 100). Re-check vs FX before launch.

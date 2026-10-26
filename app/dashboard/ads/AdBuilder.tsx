@@ -84,7 +84,9 @@ export default function AdBuilder({ accounts, pages, items, action }: {
           <textarea name="message" rows={3} maxLength={600} value={message} onChange={(e) => setMessage(e.target.value)} required style={{ width: "100%" }} />
         </label>
 
-        <button className="btn btn-lime" disabled={!hasPage}>Create draft campaign</button>
+        {item && !item.imageUrl && <div className="notice notice-bad" role="alert" style={{ margin: 0 }}>This product has no photo, and Meta needs one for the ad. Add a photo in your <a href="/dashboard/catalogue">Catalogue</a> or pick another product.</div>}
+        {cur !== "NGN" && <div style={{ fontSize: 12.5, color: "#8A5A0B", background: "#FBF0DC", borderRadius: 8, padding: "8px 10px" }}>This ad account bills in {cur}, so the budget is in {cur}, not Naira. For Nigerian ads, pick your NGN account above.</div>}
+        <button className="btn btn-lime" disabled={!hasPage || !item?.imageUrl}>Create draft campaign</button>
         <p style={{ color: "var(--ink-70)", fontSize: 13, margin: 0 }}>Created paused. You review and switch it on in Meta Ads Manager — nothing spends until then.</p>
       </form>
 

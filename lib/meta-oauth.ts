@@ -8,7 +8,7 @@ import { serverEnv } from "@/lib/env";
 // Other businesses only get these after Meta App Review.
 export const FACEBOOK_SCOPES = [
   "pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement",
-  "business_management", "ads_management", "ads_read",
+  "business_management", "ads_management", "ads_read", "pages_manage_ads",
   "instagram_basic", "instagram_manage_messages",
 ];
 

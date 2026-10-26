@@ -1,4 +1,5 @@
 import "server-only";
+import { explainAdError, type AdFailure, type AdStep } from "@/lib/ad-errors";
 
 // Meta Graph API calls for Embedded Signup (a business connects its own WhatsApp number through Meta's login).
 const graph = () => `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v26.0"}`;
@@ -100,26 +101,33 @@ export async function subscribePage(pageToken: string, pageId: string): Promise<
 }
 
 // ---- Ads (Marketing API) ----
-// A business boosts a product with a click-to-chat ad. Everything is created PAUSED,
-// so no money is spent until the business turns it on in Ads Manager.
+// A business boosts a product with a click-to-chat ad. Everything is created PAUSED, so no money is
+// spent until the business turns it on in Ads Manager. If any step fails, the half-made campaign is
+// deleted and the failure is explained step by step (see lib/ad-errors.ts).
 
-async function adPost(adAccountId: string, edge: string, token: string, body: Record<string, unknown>): Promise<{ id: string }> {
-  const res = await fetch(`${graph()}/${adAccountId}/${edge}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+export class AdStepError extends Error {
+  constructor(public failure: AdFailure) { super(`${failure.step}: ${failure.title}`); }
+}
+
+async function adCall(step: AdStep, url: string, token: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) {
+    throw new AdStepError(explainAdError(step, `network error: ${(e as Error).message}`));
+  }
   const text = await res.text();
-  if (!res.ok) throw new Error(`${edge} create failed ${res.status}: ${text.slice(0, 300)}`);
-  return JSON.parse(text) as { id: string };
+  if (!res.ok) throw new AdStepError(explainAdError(step, text));
+  return JSON.parse(text) as Record<string, unknown>;
 }
 
 export type AdDestination = "whatsapp" | "messenger" | "instagram";
 
-const DEST: Record<AdDestination, { destination_type: string; cta: string }> = {
-  whatsapp: { destination_type: "WHATSAPP", cta: "WHATSAPP_MESSAGE" },
-  messenger: { destination_type: "MESSENGER", cta: "MESSAGE_PAGE" },
-  instagram: { destination_type: "INSTAGRAM_DIRECT", cta: "INSTAGRAM_MESSAGE" },
+// What each destination needs on the ad set and in the creative's button.
+const DEST: Record<AdDestination, { destination_type: string; cta: string; app_destination: string; link: string }> = {
+  whatsapp: { destination_type: "WHATSAPP", cta: "WHATSAPP_MESSAGE", app_destination: "WHATSAPP", link: "https://api.whatsapp.com/send" },
+  messenger: { destination_type: "MESSENGER", cta: "MESSAGE_PAGE", app_destination: "MESSENGER", link: "https://fb.com/messenger_doc/" },
+  instagram: { destination_type: "INSTAGRAM_DIRECT", cta: "INSTAGRAM_MESSAGE", app_destination: "INSTAGRAM_DIRECT", link: "https://www.instagram.com/" },
 };
 
 export type AdTargeting = { countries?: string[]; ageMin?: number; ageMax?: number; genders?: number[] };
@@ -127,7 +135,7 @@ export type AdTargeting = { countries?: string[]; ageMin?: number; ageMax?: numb
 /** Creates a click-to-chat campaign, ad set, creative and ad — all PAUSED. Returns the Meta ids. */
 export async function launchClickToChatAd(args: {
   adAccountId: string; token: string; pageId: string; destination: AdDestination;
-  name: string; message: string; dailyBudgetMinor: number; imageUrl?: string | null; targeting?: AdTargeting;
+  name: string; headline: string; message: string; dailyBudgetMinor: number; imageUrl?: string | null; targeting?: AdTargeting;
 }): Promise<{ campaignId: string; adsetId: string; creativeId: string; adId: string }> {
   const d = DEST[args.destination];
   const t = args.targeting ?? {};
@@ -135,39 +143,62 @@ export async function launchClickToChatAd(args: {
   if (t.ageMin) targeting.age_min = t.ageMin;
   if (t.ageMax) targeting.age_max = t.ageMax;
   if (t.genders && t.genders.length) targeting.genders = t.genders;
+  const acct = `${graph()}/${args.adAccountId}`;
 
-  const campaign = await adPost(args.adAccountId, "campaigns", args.token, {
+  // 1. Meta needs the photo uploaded to the ad account; it returns a hash the creative refers to.
+  if (!args.imageUrl) throw new AdStepError(explainAdError("image", "This product has no photo."));
+  let imageHash: string;
+  try {
+    const img = await fetch(args.imageUrl);
+    if (!img.ok) throw new Error(`photo download ${img.status}`);
+    const bytes = Buffer.from(await img.arrayBuffer()).toString("base64");
+    const up = await adCall("image", `${acct}/adimages`, args.token, { bytes });
+    const first = Object.values((up.images ?? {}) as Record<string, { hash?: string }>)[0];
+    if (!first?.hash) throw new AdStepError(explainAdError("image", JSON.stringify(up)));
+    imageHash = first.hash;
+  } catch (e) {
+    if (e instanceof AdStepError) throw e;
+    throw new AdStepError(explainAdError("image", (e as Error).message));
+  }
+
+  // 2. Campaign. Budget lives on the ad set, so budget sharing is off (Meta requires the field).
+  const campaign = await adCall("campaign", `${acct}/campaigns`, args.token, {
     name: args.name, objective: "OUTCOME_ENGAGEMENT", special_ad_categories: [], status: "PAUSED",
-    // Budget lives on the ad set, so ad sets don't share a campaign budget. Meta requires this field.
     is_adset_budget_sharing_enabled: false,
   });
+  const campaignId = String(campaign.id);
 
-  const adset = await adPost(args.adAccountId, "adsets", args.token, {
-    name: args.name, campaign_id: campaign.id, daily_budget: args.dailyBudgetMinor,
-    billing_event: "IMPRESSIONS", optimization_goal: "CONVERSATIONS",
-    destination_type: d.destination_type, promoted_object: { page_id: args.pageId },
-    targeting,
-    status: "PAUSED",
-  });
+  try {
+    // 3. Ad set: budget, audience and the chat destination. Lowest-cost bidding needs no bid amount.
+    const adset = await adCall("adset", `${acct}/adsets`, args.token, {
+      name: args.name, campaign_id: campaignId, daily_budget: args.dailyBudgetMinor,
+      billing_event: "IMPRESSIONS", optimization_goal: "CONVERSATIONS", bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      destination_type: d.destination_type, promoted_object: { page_id: args.pageId },
+      targeting, status: "PAUSED",
+    });
 
-  const creative = await adPost(args.adAccountId, "adcreatives", args.token, {
-    name: args.name,
-    object_story_spec: {
-      page_id: args.pageId,
-      link_data: {
-        message: args.message,
-        link: `https://facebook.com/${args.pageId}`,
-        ...(args.imageUrl ? { picture: args.imageUrl } : {}),
-        call_to_action: { type: d.cta },
+    // 4. Creative: photo, text and the chat button.
+    const creative = await adCall("creative", `${acct}/adcreatives`, args.token, {
+      name: args.name,
+      object_story_spec: {
+        page_id: args.pageId,
+        link_data: {
+          image_hash: imageHash, link: d.link, name: args.headline.slice(0, 40), message: args.message,
+          call_to_action: { type: d.cta, value: { app_destination: d.app_destination } },
+        },
       },
-    },
-  });
+    });
 
-  const ad = await adPost(args.adAccountId, "ads", args.token, {
-    name: args.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: "PAUSED",
-  });
-
-  return { campaignId: campaign.id, adsetId: adset.id, creativeId: creative.id, adId: ad.id };
+    // 5. The ad itself, paused.
+    const ad = await adCall("ad", `${acct}/ads`, args.token, {
+      name: args.name, adset_id: String(adset.id), creative: { creative_id: String(creative.id) }, status: "PAUSED",
+    });
+    return { campaignId, adsetId: String(adset.id), creativeId: String(creative.id), adId: String(ad.id) };
+  } catch (e) {
+    // Don't leave a half-built campaign in the owner's Ads Manager.
+    await fetch(`${graph()}/${campaignId}`, { method: "DELETE", headers: { Authorization: `Bearer ${args.token}` } }).catch(() => {});
+    throw e;
+  }
 }
 
 /** Reads spend and messaging results for a campaign, so the dashboard shows Naira-in vs chats-out. */

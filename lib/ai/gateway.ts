@@ -2,7 +2,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env";
-import { AI } from "@/lib/config";
+import { AI, freeMode } from "@/lib/config";
 import { creditsFor, limitCodeFrom, limitMessage, reservationFor, usdCost, type RateCard } from "@/lib/credits";
 
 // Every model call in the product goes through gatewayCall(). Nothing else imports the SDK.
@@ -63,12 +63,13 @@ function provider(): Provider {
 
 async function loadPolicy(workspaceId: string, requestedModel?: string) {
   const db = supabaseAdmin();
-  const { data: sub } = await db.from("platform_subscriptions").select("plan_id").eq("workspace_id", workspaceId).single();
-  if (!sub) throw new GatewayError("NO_SUBSCRIPTION", 402, limitMessage("NO_SUBSCRIPTION").message);
-  const { data: plan } = await db.from("platform_plans").select("*").eq("id", sub.plan_id).single();
-  const { data: limits } = await db.from("platform_spend_limits").select("default_model").single();
+  const free = freeMode();
+  const { data: sub } = await db.from("platform_subscriptions").select("plan_id").eq("workspace_id", workspaceId).maybeSingle();
+  if (!sub && !free) throw new GatewayError("NO_SUBSCRIPTION", 402, limitMessage("NO_SUBSCRIPTION").message);
+  const { data: plan } = sub ? await db.from("platform_plans").select("*").eq("id", sub.plan_id).single() : { data: null };
+  const { data: limits } = await db.from("platform_spend_limits").select("default_model").maybeSingle();
   const model = requestedModel || limits?.default_model || AI.defaultModel;
-  if (!plan.allowed_models.includes(model)) throw new GatewayError("MODEL_NOT_ALLOWED", 403, `Your plan does not include ${model}.`);
+  if (!free && !plan?.allowed_models.includes(model)) throw new GatewayError("MODEL_NOT_ALLOWED", 403, `Your plan does not include ${model}.`);
   const { data: rate } = await db.from("ai_cost_rate_cards").select("*").eq("model", model)
     .lte("effective_from", new Date().toISOString()).order("effective_from", { ascending: false }).limit(1).single();
   if (!rate) throw new GatewayError("NO_RATE_CARD", 500, `No rate card for ${model}.`);
@@ -78,13 +79,43 @@ async function loadPolicy(workspaceId: string, requestedModel?: string) {
     cache_write_usd_per_mtok: Number(rate.cache_write_usd_per_mtok), cache_read_usd_per_mtok: Number(rate.cache_read_usd_per_mtok),
     credits_per_usd: Number(rate.credits_per_usd),
   };
-  return { model, rate: r, maxOutput: plan.max_output_tokens as number };
+  return { model, rate: r, maxOutput: (plan?.max_output_tokens as number | undefined) ?? 1024 };
+}
+
+// Free early access: call the model with no credit hold, and log usage at zero credits.
+async function freeCall(req: GatewayRequest, model: string, rate: RateCard, maxTokens: number): Promise<Anthropic.Message> {
+  const db = supabaseAdmin();
+  const log = async (ok: boolean, usage: Anthropic.Usage | null, requestId: string | null, error: string | null) => {
+    const u = usage ?? { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+    const { error: e } = await db.from("ai_usage_events").insert({
+      workspace_id: req.workspaceId, agent_id: req.agentId ?? null, user_id: req.userId ?? null, conversation_id: req.conversationId ?? null,
+      feature: req.feature, model, input_tokens: u.input_tokens, output_tokens: u.output_tokens,
+      cache_creation_tokens: u.cache_creation_input_tokens ?? 0, cache_read_tokens: u.cache_read_input_tokens ?? 0,
+      provider_request_id: requestId, rate_card_version: rate.version, est_cost_usd: usdCost(u, rate), credits_consumed: 0,
+      status: ok ? "succeeded" : "failed", error,
+    });
+    if (e) console.error("[gateway] free-mode usage log failed", e.message);
+  };
+  try {
+    const { message, requestId } = await provider().create({
+      model, max_tokens: maxTokens, system: req.system, messages: req.messages, ...(req.tools?.length ? { tools: req.tools } : {}),
+    });
+    await log(true, message.usage, requestId, null);
+    return message;
+  } catch (err) {
+    if (err instanceof GatewayError) { await log(false, null, null, err.code); throw err; }
+    const status = (err as { status?: number }).status;
+    await log(false, null, null, `provider_error_${status ?? "network"}`);
+    console.error("[gateway] provider error", { status, workspace: req.workspaceId, feature: req.feature, model, detail: String((err as { message?: string }).message ?? "").slice(0, 400) });
+    throw new GatewayError("PROVIDER_ERROR", 502, "The assistant could not reply just now. Please try again.");
+  }
 }
 
 export async function gatewayCall(req: GatewayRequest): Promise<Anthropic.Message> {
   const db = supabaseAdmin();
   const { model, rate, maxOutput } = await loadPolicy(req.workspaceId, req.model);
   const maxTokens = Math.min(req.maxTokens ?? maxOutput, maxOutput);
+  if (freeMode()) return freeCall(req, model, rate, maxTokens);
   // images are billed by size (~1,600 tokens for a phone screenshot), not by their base64 length
   const msgChars = JSON.stringify(req.messages, (k, v) => (k === "data" && typeof v === "string" && v.length > 1000 ? "x".repeat(5000) : v)).length;
   const inputChars = req.system.length + msgChars + JSON.stringify(req.tools ?? []).length;

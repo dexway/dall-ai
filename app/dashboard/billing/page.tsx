@@ -1,6 +1,6 @@
 import { requireWorkspace, canManage } from "@/lib/workspace";
 import { formatNaira } from "@/lib/money";
-import { TOP_UPS } from "@/lib/config";
+import { TOP_UPS, freeMode } from "@/lib/config";
 import TopUpButton from "./TopUpButton";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { confirmTopUp } from "@/lib/payments";
@@ -39,6 +39,12 @@ export default async function Billing({ searchParams }: { searchParams: Promise<
   return (
     <>
       <div className="page-head"><div><h1>Usage & billing</h1><p>Your AI credits pay for your assistant&apos;s replies. This is separate from your own sales, which go straight to your account.</p></div></div>
+      {freeMode() && (
+        <div style={{ background: "#14231F", color: "#F4F0E7", borderRadius: 14, padding: "16px 18px", marginBottom: 16, display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ background: "#C8EE72", color: "#14231F", fontWeight: 800, fontSize: 12, letterSpacing: ".06em", borderRadius: 999, padding: "5px 10px" }}>FREE EARLY ACCESS</span>
+          <span style={{ flex: 1, minWidth: 220, fontSize: 14.5 }}>Dall AI is free while we&apos;re in early access. Your assistant keeps replying without using credits, and no card is needed. You can still buy credits below for later.</span>
+        </div>
+      )}
       {sp.topup === "ok" && <div className="notice notice-info" role="status">Payment received by Paystack. Credits appear here as soon as we verify it (usually within a minute).</div>}
       {low && <div className="notice notice-bad" role="alert">You have less than 20% of your credits left. When they run out, your assistant stops replying until you top up.</div>}
 

@@ -4,6 +4,7 @@ import { requireWorkspace, canManage } from "@/lib/workspace";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { serverEnv } from "@/lib/env";
+import CopyButton from "./CopyButton";
 
 export const metadata = { title: "Payment settings" };
 
@@ -37,6 +38,7 @@ async function savePaystack(formData: FormData) {
   const enable = formData.get("enabled") === "on";
   if (secret && !/^sk_(test|live)_[A-Za-z0-9]{20,}$/.test(secret)) redirect("/dashboard/settings?error=sk");
   if (pub && !/^pk_(test|live)_[A-Za-z0-9]{20,}$/.test(pub)) redirect("/dashboard/settings?error=pk");
+  if (secret && pub && secret.split("_")[1] !== pub.split("_")[1]) redirect("/dashboard/settings?error=mode");
   if (secret) {
     // Membership + role were checked above; the secret table is only writable by the server.
     const { error } = await supabaseAdmin().from("business_payment_secrets")
@@ -99,19 +101,37 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const waCallback = `${serverEnv.siteUrl()}/api/webhooks/whatsapp`;
   const { data: wsRow } = await ctx.db.from("workspaces").select("business_profile").eq("id", ctx.workspace.id).single();
   const bp = (wsRow?.business_profile ?? {}) as Record<string, string | undefined>;
-  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", save: "Couldn't save. Try again.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
+  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", mode: "Your secret and public keys must both be test keys or both be live keys.", save: "Couldn't save. Try again.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
+
+  const psMode = s?.paystack_public_key?.startsWith("pk_live_") ? "live" : s?.paystack_public_key?.startsWith("pk_test_") ? "test" : null;
+  const psStatus = !sec ? { t: "Not connected", c: "#5B6461", b: "#EEF0EE" }
+    : !s?.paystack_enabled ? { t: "Connected · off at checkout", c: "#8A5A0B", b: "#FBF0DC" }
+    : psMode === "live" ? { t: "Live · taking payments", c: "#1E7A45", b: "#E3F5EA" }
+    : { t: "Test mode", c: "#1F4FD1", b: "#E6EEFF" };
+  const bankReady = Boolean(s?.bank_name && s?.account_number && s?.account_name);
+  const savedMsg: Record<string, string> = { bank: "Bank details saved. Your assistant uses them from the next order.", paystack: "Paystack settings saved.", whatsapp: "WhatsApp saved.", profile: "Business details saved." };
 
   return (
     <>
       <div className="page-head"><div><h1>Payment settings</h1><p>Where your customers&apos; money goes. Payments always settle to your own account; {""}
         Dall AI never holds your sales money.</p></div></div>
-      {sp.saved && <div className="notice notice-ok" role="status">Saved.</div>}
+      {sp.saved && <div className="notice notice-ok" role="status">{savedMsg[sp.saved] ?? "Saved."}</div>}
       {sp.error && <div className="notice notice-bad" role="alert">{errors[sp.error] ?? "Something went wrong."}</div>}
 
       <div className="two">
         <form action={saveBank} className="panel">
-          <h2>Bank transfer</h2>
-          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Your assistant sends these in the chat with the exact amount and order reference, then asks for the transfer screenshot.</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <h2 style={{ margin: 0 }}>Bank transfer</h2>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 6, background: bankReady ? "#E3F5EA" : "#FBF0DC", color: bankReady ? "#1E7A45" : "#8A5A0B" }}>{bankReady ? "Ready" : "Add your account"}</span>
+          </div>
+          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>The main way customers pay. Your assistant sends these details in the chat with the exact amount and order reference, starts a countdown, then asks for the transfer screenshot — which you confirm in Payments to check.</p>
+          <div style={{ background: "#14231F", borderRadius: 12, padding: 12, margin: "4px 0 6px" }}>
+            <div style={{ fontSize: 11, color: "#9fb3ab", marginBottom: 6, fontFamily: "var(--f-mono, monospace)" }}>What customers see in the chat</div>
+            <div style={{ background: "#21352F", color: "#F4F0E7", borderRadius: "14px 14px 4px 14px", padding: "10px 12px", fontSize: 13.5, lineHeight: 1.5 }}>
+              Transfer <b>₦140,000</b> to <b>{s?.bank_name || "your bank"}</b> · <span style={{ fontFamily: "monospace" }}>{s?.account_number || "0000000000"}</span> · {s?.account_name || "your account name"}. Use <span style={{ fontFamily: "monospace" }}>MAM-7KQ2X9PD</span> as the narration. You have {s?.payment_window_minutes ?? 60} mins — then send the screenshot here 📎
+              {(s?.early_pay_bonus_pct ?? 0) > 0 && <> Pay within the time and get {s?.early_pay_bonus_pct}% off.</>}
+            </div>
+          </div>
           <div className="form-grid">
             <label className="field"><span>Bank</span><input id="bank_name" name="bank_name" className="input" defaultValue={s?.bank_name ?? ""} placeholder="e.g. GTBank, Moniepoint, Opay" /></label>
             <label className="field"><span>Account number</span><input id="account_number" name="account_number" className="input mono" inputMode="numeric" maxLength={10} defaultValue={s?.account_number ?? ""} /></label>
@@ -127,14 +147,28 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         </form>
 
         <form action={savePaystack} className="panel">
-          <h2>Paystack (cards, USSD, bank transfer via Paystack)</h2>
-          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Use the keys from your own Paystack dashboard → Settings → API Keys & Webhooks. Start with test keys.</p>
-          <label className="field"><span>Secret key</span><input id="secret" name="secret" type="password" autoComplete="off" className="input mono" placeholder={sec ? "•••••••• saved (enter a new one to replace)" : "sk_test_…"} />
-            <small>Encrypted before it&apos;s stored. It is never shown again or sent to the browser.</small></label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <h2 style={{ margin: 0 }}>Paystack <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink-70)" }}>· optional</span></h2>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 6, background: psStatus.b, color: psStatus.c }}>{psStatus.t}</span>
+          </div>
+          <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Let customers also pay by card, USSD or bank app through your own Paystack account. Money settles to you; Dall AI only checks the payment went through. Skip this if bank transfer is enough.</p>
+          <ol style={{ margin: "0 0 4px", paddingLeft: 18, color: "var(--ink-70)", fontSize: 13.5, lineHeight: 1.7 }}>
+            <li>Open <a href="https://dashboard.paystack.com/#/settings/developers" target="_blank" rel="noreferrer">Paystack → Settings → API Keys &amp; Webhooks</a>.</li>
+            <li>Copy your <b>secret</b> and <b>public</b> keys below. Start with test keys, switch to live when you&apos;re ready.</li>
+            <li>Paste the webhook URL below into Paystack&apos;s <b>Webhook URL</b> box.</li>
+            <li>Tick <b>Offer Paystack at checkout</b> and save.</li>
+          </ol>
+          <label className="field"><span>Secret key</span><input id="secret" name="secret" type="password" autoComplete="off" className="input mono" placeholder={sec ? "•••••••• saved — enter a new one to replace" : "sk_test_…"} />
+            <small>Encrypted before it&apos;s stored. Never shown again or sent to the browser.</small></label>
           <label className="field"><span>Public key</span><input id="public" name="public" className="input mono" defaultValue={s?.paystack_public_key ?? ""} placeholder="pk_test_…" /></label>
+          <div className="field"><span>Webhook URL (paste into Paystack)</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <code className="input mono" style={{ overflowWrap: "anywhere", display: "block", flex: 1, fontSize: 12.5 }}>{webhook}</code>
+              <CopyButton text={webhook} />
+            </div>
+            <small>Paystack payments are confirmed only after Dall AI verifies the transaction with Paystack directly.</small></div>
           <label className="chip" style={{ width: "fit-content", cursor: "pointer" }}><input id="enabled" type="checkbox" name="enabled" defaultChecked={s?.paystack_enabled} /> Offer Paystack at checkout</label>
-          <div className="field"><span>Your webhook URL (paste into Paystack)</span><code className="input mono" style={{ overflowWrap: "anywhere", display: "block" }}>{webhook}</code>
-            <small>Orders paid by Paystack are confirmed only after we verify the transaction with Paystack directly.</small></div>
+          {psMode === "test" && s?.paystack_enabled && <small style={{ color: "#1F4FD1" }}>Test keys: customers can&apos;t really pay yet. Swap in live keys to start taking real payments.</small>}
           <div><button className="btn btn-ink">Save Paystack</button></div>
         </form>
       </div>
