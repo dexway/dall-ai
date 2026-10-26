@@ -58,6 +58,10 @@ export default function Landing() {
               </div>
             </div>
 
+            <div className="hero-visual">
+            <div className="hero-photo" role="img" aria-label="A Lagos business owner walks through his busy workshop, checking his phone as his assistant handles customers">
+              <span className="photo-tag">● On the factory floor · Amaka is on the phones</span>
+            </div>
             <div className="scene" aria-label="Example conversation between a customer and an assistant">
               <div className="scene-head">
                 <span className="agent-pill glass"><span className="avatar">A</span>Amaka · Mama Put Kitchen</span>
@@ -88,6 +92,7 @@ export default function Landing() {
                 </div></div>
               </div>
               <div className="ask glass"><span>Ask Amaka anything…</span><span className="send" aria-hidden>↑</span></div>
+            </div>
             </div>
           </div>
         </section>
