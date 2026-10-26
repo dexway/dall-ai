@@ -8,7 +8,7 @@ export const metadata = { title: "Orders" };
 export default async function Orders({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { db, workspace } = await requireWorkspace();
   const { status } = await searchParams;
-  let q = db.from("orders").select("id,reference,status,total_kobo,created_at,customers(name,phone)").eq("workspace_id", workspace.id).order("created_at", { ascending: false }).limit(100);
+  let q = db.from("orders").select("id,reference,status,total_kobo,created_at,pay_on_delivery,customers(name,phone)").eq("workspace_id", workspace.id).order("created_at", { ascending: false }).limit(100);
   if (status && ORDER_STATUS[status]) q = q.eq("status", status);
   const { data: orders } = await q;
   const filters = ["awaiting_payment", "verification_pending", "payment_confirmed", "order_fulfilled"];
@@ -27,7 +27,7 @@ export default async function Orders({ searchParams }: { searchParams: Promise<{
             return (
               <tr key={o.id}><td className="mono"><Link href={`/dashboard/orders/${o.id}`}>{o.reference}</Link></td>
                 <td>{c?.name ?? "—"}<div style={{ fontSize: 13, color: "var(--ink-50)" }}>{c?.phone}</div></td>
-                <td><StatusChip status={o.status} /></td><td className="num">{formatNaira(o.total_kobo)}</td>
+                <td><StatusChip status={o.status} />{o.pay_on_delivery && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "#E6EEFF", color: "#1F4FD1" }}>🚚 PAY ON DELIVERY</span>}</td><td className="num">{formatNaira(o.total_kobo)}</td>
                 <td>{new Date(o.created_at).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" })}</td></tr>
             );
           })}</tbody>

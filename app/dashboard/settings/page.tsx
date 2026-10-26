@@ -28,8 +28,9 @@ async function saveBank(formData: FormData) {
   const { error } = await ctx.db.from("business_payment_settings").update({
     transfer_instructions: String(formData.get("transfer_instructions") ?? "").trim() || null,
     payment_deadline_hours: Math.min(168, Math.max(1, Number(formData.get("payment_deadline_hours")) || 24)),
-    payment_window_minutes: Math.min(1440, Math.max(5, Number(formData.get("payment_window_minutes")) || 60)),
+    payment_window_minutes: Math.min(1440, Math.max(5, Number(formData.get("payment_window_minutes")) || 40)),
     early_pay_bonus_pct: Math.min(15, Math.max(0, Math.round(Number(formData.get("early_pay_bonus_pct")) || 0))),
+    pay_on_delivery_enabled: formData.get("pay_on_delivery_enabled") === "on",
     updated_at: new Date().toISOString(),
   }).eq("workspace_id", ctx.workspace.id);
   if (error) redirect("/dashboard/settings?error=save");
@@ -160,7 +161,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <div style={{ background: "#14231F", borderRadius: 12, padding: 12, margin: "4px 0 6px" }}>
             <div style={{ fontSize: 11, color: "#9fb3ab", marginBottom: 6, fontFamily: "var(--f-mono, monospace)" }}>What customers see in the chat</div>
             <div style={{ background: "#21352F", color: "#F4F0E7", borderRadius: "14px 14px 4px 14px", padding: "10px 12px", fontSize: 13.5, lineHeight: 1.5 }}>
-              Transfer <b>₦140,000</b> to <b>{s?.bank_name || "your bank"}</b> · <span style={{ fontFamily: "monospace" }}>{s?.account_number ? `••••••${s.account_number.slice(-4)}` : "0000000000"}</span> · {s?.account_name || "your account name"}. Use <span style={{ fontFamily: "monospace" }}>MAM-7KQ2X9PD</span> as the narration. You have {s?.payment_window_minutes ?? 60} mins — then send the screenshot here 📎
+              Transfer <b>₦140,000</b> to <b>{s?.bank_name || "your bank"}</b> · <span style={{ fontFamily: "monospace" }}>{s?.account_number ? `••••••${s.account_number.slice(-4)}` : "0000000000"}</span> · {s?.account_name || "your account name"}. Use <span style={{ fontFamily: "monospace" }}>MAM-7KQ2X9PD</span> as the narration. You have {s?.payment_window_minutes ?? 40} mins — then send the screenshot here 📎
               {(s?.early_pay_bonus_pct ?? 0) > 0 && <> Pay within the time and get {s?.early_pay_bonus_pct}% off.</>}
             </div>
           </div>
@@ -170,8 +171,10 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           </div>
           <label className="field"><span>Account name</span><input id="account_name" name="account_name" className="input" defaultValue={s?.account_name ?? ""} /></label>
           <label className="field"><span>Extra instructions</span><textarea id="transfer_instructions" name="transfer_instructions" className="input" defaultValue={s?.transfer_instructions ?? ""} placeholder="Use your order reference as the narration." /></label>
-          <label className="field"><span>Chat payment timer (minutes)</span><input id="payment_window_minutes" name="payment_window_minutes" type="number" min={5} max={1440} className="input" defaultValue={s?.payment_window_minutes ?? 60} />
-            <small>After your assistant gives your bank details, the customer sees a countdown to pay and send their receipt.</small></label>
+          <label className="field"><span>Chat payment timer (minutes)</span><input id="payment_window_minutes" name="payment_window_minutes" type="number" min={5} max={1440} className="input" defaultValue={s?.payment_window_minutes ?? 40} />
+            <small>After your assistant gives your bank details, the customer sees a countdown to pay and send their receipt (40 minutes recommended). With 10 minutes left the chat nudges them to pay now; when time runs out the payment details expire.</small></label>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14 }}><input type="checkbox" name="pay_on_delivery_enabled" defaultChecked={Boolean(s?.pay_on_delivery_enabled)} style={{ marginTop: 3 }} />
+            <span><b>Offer pay on delivery when time runs out</b><br /><small style={{ color: "var(--ink-70)" }}>If a customer hasn&apos;t paid when the timer ends, the chat offers to keep the order as pay on delivery instead of losing the sale. You&apos;ll see it marked in Orders.</small></span></label>
           <label className="field"><span>Early-payment bonus (%)</span><input id="early_pay_bonus_pct" name="early_pay_bonus_pct" type="number" min={0} max={15} className="input" defaultValue={s?.early_pay_bonus_pct ?? 0} />
             <small>Customers who pay inside the countdown get this percentage off. 0 turns it off. Max 15%.</small></label>
           <input type="hidden" name="payment_deadline_hours" value={s?.payment_deadline_hours ?? 24} />

@@ -125,9 +125,10 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
       return { ...base, checkout_link: checkoutUrl(order.public_token), next_step: "Share the checkout link; the customer pays there." };
     }
     if (name === "check_order") {
-      const { data } = await db.from("orders").select("reference,status,total_kobo").eq("workspace_id", ws)
+      const { data } = await db.from("orders").select("reference,status,total_kobo,pay_on_delivery").eq("workspace_id", ws)
         .eq("reference", String(input.reference ?? "").toUpperCase().trim()).maybeSingle();
       if (!data) return { error: "No order with that reference for this business." };
+      if (data.pay_on_delivery && data.status === "awaiting_payment") return { reference: data.reference, status: "pay on delivery: customer pays when the order arrives; the team will arrange delivery", total: formatNaira(data.total_kobo) };
       return { reference: data.reference, status: STATUS_WORDS[data.status] ?? data.status, total: formatNaira(data.total_kobo) };
     }
     return { error: `Unknown tool ${name}` };

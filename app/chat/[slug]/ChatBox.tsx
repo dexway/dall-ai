@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 
 type Msg = { role: "user" | "assistant" | "err"; text: string };
-type Pending = { reference: string; total_kobo: number; expires_at: string | null; status: string } | null;
+type Pending = { reference: string; total_kobo: number; expires_at: string | null; status: string; pay_on_delivery?: boolean; pod_offered?: boolean } | null;
 type Props = { slug: string; business: string; agent: { name: string; role: string; greeting: string; avatar: string | null; color: string } };
 
 const naira = (k: number) => "₦" + (k / 100).toLocaleString("en-NG", { maximumFractionDigits: 2 });
@@ -14,12 +14,14 @@ function linkify(text: string) {
 function useCountdown(until: string | null) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { if (!until) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [until]);
-  if (!until) return null;
+  if (!until) return { label: null, ms: null };
   const ms = new Date(until).getTime() - now;
-  if (ms <= 0) return "0:00";
+  if (ms <= 0) return { label: "0:00", ms: 0 };
   const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+  return { label: h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`, ms };
 }
+
+const NUDGE_MS = 10 * 60_000; // with 10 minutes left (minute 30 of 40), nudge the customer to pay now
 
 export default function ChatBox({ slug, business, agent }: Props) {
   const key = `dall-chat-${slug}`;
@@ -30,8 +32,27 @@ export default function ChatBox({ slug, business, agent }: Props) {
   const [text, setText] = useState("");
   const log = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const left = useCountdown(pending?.status === "awaiting_payment" || pending?.status === "payment_rejected" ? pending.expires_at : null);
+  const { label: left, ms: leftMs } = useCountdown((pending?.status === "awaiting_payment" || pending?.status === "payment_rejected") && !pending?.pay_on_delivery ? pending.expires_at : null);
   const expired = left === "0:00";
+  const nudge = leftMs !== null && leftMs > 0 && leftMs <= NUDGE_MS;
+  const [nudged, setNudged] = useState(false);
+  useEffect(() => {
+    if (nudge && !nudged && pending) {
+      setNudged(true);
+      setMsgs((m) => [...m, { role: "assistant", text: `⏰ Just 10 minutes left to pay ${naira(pending.total_kobo)} for ${pending.reference}. Pay now and tap 📎 to send your receipt, so your order isn't cancelled.` }]);
+    }
+  }, [nudge, nudged, pending]);
+
+  async function payOnDelivery() {
+    if (!ids.conversationId || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/agent/${slug}/pod`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids) });
+      const body = await res.json();
+      if ("pending" in body) setPending(body.pending);
+      setMsgs((m) => [...m, res.ok ? { role: "assistant", text: body.reply } : { role: "err", text: body.error ?? "Couldn't switch to pay on delivery." }]);
+    } catch { setMsgs((m) => [...m, { role: "err", text: "No connection. Try again." }]); } finally { setBusy(false); }
+  }
 
   useEffect(() => {
     try {
@@ -80,7 +101,7 @@ export default function ChatBox({ slug, business, agent }: Props) {
     } finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
   }
 
-  const canUpload = Boolean(ids.conversationId && pending && ["awaiting_payment", "payment_rejected"].includes(pending.status));
+  const canUpload = Boolean(ids.conversationId && pending && !pending.pay_on_delivery && !expired && ["awaiting_payment", "payment_rejected"].includes(pending.status));
 
   return (
     <>
@@ -91,12 +112,19 @@ export default function ChatBox({ slug, business, agent }: Props) {
       </div>
 
       {pending && (
-        <div className={`pay-bar ${pending.status === "payment_confirmed" ? "ok" : expired ? "late" : ""}`} role="status">
+        <div className={`pay-bar ${pending.status === "payment_confirmed" || pending.pay_on_delivery ? "ok" : expired || nudge ? "late" : ""}`} role="status">
           {pending.status === "payment_confirmed" ? <span>✓ Payment confirmed for <b className="mono">{pending.reference}</b></span>
             : pending.status === "verification_pending" ? <span>Receipt received · {business} is verifying <b className="mono">{pending.reference}</b></span>
+            : pending.pay_on_delivery ? <span>🚚 Pay on delivery · <b className="mono">{naira(pending.total_kobo)}</b> · ref <b className="mono">{pending.reference}</b> · {business} will contact you</span>
+            : expired ? <>
+                <span>Time&apos;s up for <b className="mono">{pending.reference}</b>. The payment details have expired.</span>
+                {pending.pod_offered
+                  ? <button type="button" className="btn btn-lime btn-sm" onClick={payOnDelivery} disabled={busy}>🚚 Pay on delivery instead</button>
+                  : <span style={{ fontSize: 12.5 }}>Message us to get new payment details.</span>}
+              </>
             : <>
                 <span>Pay <b className="mono">{naira(pending.total_kobo)}</b> · ref <b className="mono">{pending.reference}</b></span>
-                <span className="timer mono">{expired ? "Time's up" : `⏱ ${left}`}</span>
+                <span className="timer mono">{nudge ? `⏰ ${left} left · pay now` : `⏱ ${left}`}</span>
                 <button type="button" className="btn btn-lime btn-sm" onClick={() => fileRef.current?.click()} disabled={busy}>📎 Send receipt</button>
               </>}
         </div>

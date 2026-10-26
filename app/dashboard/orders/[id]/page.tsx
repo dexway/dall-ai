@@ -38,7 +38,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
     <>
       <div className="page-head">
         <div><Link href="/dashboard/orders" style={{ fontSize: 14 }}>← Orders</Link><h1 className="mono" style={{ fontFamily: "var(--f-mono)" }}>{o.reference}</h1></div>
-        <div className="row-actions"><StatusChip status={o.status} />
+        <div className="row-actions"><StatusChip status={o.status} />{o.pay_on_delivery && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "#E6EEFF", color: "#1F4FD1" }}>🚚 PAY ON DELIVERY</span>}
           {o.status === "payment_confirmed" && canManage(ctx) && <form action={markFulfilled}><input type="hidden" name="id" value={o.id} /><button className="btn btn-ink btn-sm">Mark fulfilled</button></form>}
         </div>
       </div>
