@@ -164,7 +164,7 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
 
       <Studio
         agent={{ id: a.id, name: a.name, role_title: a.role_title, persona: a.persona, greeting: a.greeting, instructions: a.instructions ?? "", website_url: a.website_url ?? null, knowledge: a.knowledge ?? "", accent_color: a.accent_color, max_discount_pct: Number(a.max_discount_pct), languages: a.languages, voice_style: a.voice_style }}
-        avatarUrl={avatarUrl} builtinPresets={BUILTIN_PRESETS} customPresets={customPresets}
+        avatarUrl={avatarUrl} builtinPresets={BUILTIN_PRESETS} customPresets={customPresets} initialPreset={sp.preset}
         save={save} learnFromWebsite={learnFromWebsite} saveAsPreset={saveAsPreset}
         addKnowledgeFiles={addKnowledgeFiles} clearKnowledge={clearKnowledge}
       />

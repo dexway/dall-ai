@@ -56,7 +56,7 @@ Languages: reply in whichever of ${agent.languages.join(", ")} the customer uses
 
 About this business (answer delivery, hours and policy questions from this. If a detail is not listed, say the team will confirm it):
 ${profile || "- Not filled in yet. If asked about delivery times or hours, say the team will confirm."}
-${agent.instructions ? `\nHow the owner wants you to work (follow this closely):\n${agent.instructions}` : ""}
+${agent.instructions ? `\nHow the owner wants you to work (follow this closely):\n${agent.instructions}\n(Any detail still shown in [square brackets] has not been filled in by the owner: never repeat the brackets; say the team will confirm that detail.)` : ""}
 ${agent.knowledge ? `\nBusiness knowledge (use to answer questions; never invent beyond it):\n${agent.knowledge}` : ""}
 
 Rules you never break:

@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type Preset = { key: string; label: string; emoji: string; persona: string; greeting: string; instructions: string };
+type Preset = { key: string; label: string; emoji: string; persona: string; greeting: string; instructions: string; role?: string; blurb?: string };
 type Agent = {
   id: string; name: string; role_title: string; persona: string; greeting: string;
   instructions: string; website_url: string | null; knowledge: string;
@@ -14,9 +14,9 @@ const VOICES = [
   { id: "yoruba", label: "Yorùbá" }, { id: "igbo", label: "Igbo" }, { id: "hausa", label: "Hausa" },
 ];
 
-export default function Studio({ agent, avatarUrl, builtinPresets, customPresets, save, learnFromWebsite, saveAsPreset, addKnowledgeFiles, clearKnowledge }: {
+export default function Studio({ agent, avatarUrl, builtinPresets, customPresets, initialPreset, save, learnFromWebsite, saveAsPreset, addKnowledgeFiles, clearKnowledge }: {
   agent: Agent; avatarUrl: string | null;
-  builtinPresets: Preset[]; customPresets: Preset[];
+  builtinPresets: Preset[]; customPresets: Preset[]; initialPreset?: string;
   save: (f: FormData) => void; learnFromWebsite: (f: FormData) => void; saveAsPreset: (f: FormData) => void;
   addKnowledgeFiles: (f: FormData) => void; clearKnowledge: () => void;
 }) {
@@ -32,24 +32,33 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
   const [voice, setVoice] = useState(agent.voice_style);
   const [applied, setApplied] = useState<string>("");
 
-  const apply = (p: Preset) => { setPersona(p.persona); setGreeting(p.greeting); setInstructions(p.instructions); setApplied(p.label); };
+  const apply = (p: Preset) => { setPersona(p.persona); setGreeting(p.greeting); setInstructions(p.instructions); if (p.role) setRole(p.role); setApplied(p.label); };
+  const top = useRef<HTMLElement>(null);
+  // Opened from a "ready-made assistant" link: load that preset and bring the studio into view.
+  useEffect(() => {
+    const p = builtinPresets.find((x) => x.key === initialPreset);
+    if (p) { apply(p); top.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPreset]);
+  const blanks = (instructions.match(/\[[^\]]+\]/g) ?? []).length;
   const toggleLang = (l: string) => setLangs((xs) => xs.includes(l) ? xs.filter((x) => x !== l) : [...xs, l]);
 
   return (
     <>
-      <section className="panel">
-        <h2>Start from a preset</h2>
-        <p style={{ color: "var(--ink-70)", fontSize: 14, marginTop: 2 }}>Pick the kind of business you run. It fills the personality, greeting and instructions below — edit anything, then save your own preset to reuse.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10, marginTop: 10 }}>
+      <section className="panel" ref={top} id="presets">
+        <h2>Start from a ready-made assistant</h2>
+        <p style={{ color: "var(--ink-70)", fontSize: 14, marginTop: 2 }}>Each one is a complete, tested setup for that kind of business. Pick one, fill the few <b>[blanks]</b> with your details (delivery, hours, policies), and save. Edit anything else you like, then save it as your own preset.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10, marginTop: 10 }}>
           {[...builtinPresets, ...customPresets].map((p) => (
             <button type="button" key={p.key} onClick={() => apply(p)}
               style={{ textAlign: "left", border: applied === p.label ? "2px solid var(--lime, #C8EE72)" : "1px solid var(--line, #e5e5e5)", borderRadius: 10, padding: "10px 12px", background: "#fff", cursor: "pointer" }}>
               <div style={{ fontSize: 20 }}>{p.emoji}</div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{p.label}</div>
+              {p.blurb && <div style={{ fontSize: 12, color: "var(--ink-70)", marginTop: 3, lineHeight: 1.4 }}>{p.blurb}</div>}
             </button>
           ))}
         </div>
-        {applied && <p style={{ color: "var(--ink-70)", fontSize: 13, marginTop: 8 }}>Applied <b>{applied}</b> — tweak the fields below, they aren&rsquo;t saved until you click Save assistant.</p>}
+        {applied && <p style={{ fontSize: 13, marginTop: 10, padding: "8px 10px", borderRadius: 8, background: blanks ? "#FBF0DC" : "#E3F5EA", color: blanks ? "#8A5A0B" : "#1E7A45" }}>Loaded <b>{applied}</b>. {blanks ? <>Fill the <b>{blanks} [bracketed] blank{blanks > 1 ? "s" : ""}</b> in Instructions with your details (anything you leave, your assistant will say the team will confirm),</> : <>All set,</>} then click <b>Save assistant</b>.</p>}
       </section>
 
       <div className="two" style={{ marginTop: 16 }}>

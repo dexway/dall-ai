@@ -1,3 +1,4 @@
+import { BUILTIN_PRESETS } from "@/lib/presets";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -328,11 +329,12 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
                 <h2 style={{ margin: "6px 0 18px", fontSize: 26 }}>Meet your 24/7 sales sidekick</h2>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 14, textAlign: "left" }}>
                   {[
-                    { t: "AI Replies", d: `${agent?.name ?? "Your assistant"} answers every DM and WhatsApp from your catalogue and knowledge, day and night.`, b: <Badge text="Live" tone="green" />, demo: ["How much is the party pack?", "₦85,000 — serves 40. Want me to book Saturday? 🎉"] },
-                    { t: "AI Orders & Payments", d: "Quotes the exact total, sends your bank details with a countdown, and flags fake receipts. You confirm every payment.", b: <Badge text="Live" tone="green" />, demo: ["Sent ✅ here's my receipt", "Got it! The team is confirming now 🙏"] },
-                    { t: "AI Comments", d: "Replies to comments on your posts and moves interested people into DMs to buy.", b: <Badge text="Coming soon" />, demo: ["Price pls 😍", "Sent you a DM with prices! 💬"] },
+                    { href: "/dashboard/agent?preset=general", t: "AI Replies", d: `${agent?.name ?? "Your assistant"} answers every DM and WhatsApp from your catalogue and knowledge, day and night.`, b: <Badge text="Live" tone="green" />, demo: ["How much is the party pack?", "₦85,000 — serves 40. Want me to book Saturday? 🎉"] },
+                    { href: "/dashboard/agent?preset=closer", t: "AI Orders & Payments", d: "Quotes the exact total, sends your bank details with a countdown, and flags fake receipts. You confirm every payment.", b: <Badge text="Live" tone="green" />, demo: ["Sent ✅ here's my receipt", "Got it! The team is confirming now 🙏"] },
+                    { href: "", t: "AI Comments", d: "Replies to comments on your posts and moves interested people into DMs to buy.", b: <Badge text="Coming soon" />, demo: ["Price pls 😍", "Sent you a DM with prices! 💬"] },
                   ].map((x) => (
-                    <div key={x.t} style={{ border: "1px solid var(--line,#e7e7e3)", borderRadius: 14, overflow: "hidden", background: "#fff" }}>
+                    <a key={x.t} href={x.href || undefined} className="sidekick-card" aria-disabled={!x.href}
+                      style={{ display: "block", color: "inherit", textDecoration: "none", border: "1px solid var(--line,#e7e7e3)", borderRadius: 14, overflow: "hidden", background: "#fff", cursor: x.href ? "pointer" : "default", transition: "transform .15s, box-shadow .15s" }}>
                       <div style={{ background: "#14231F", padding: 16, display: "grid", gap: 8, minHeight: 120 }}>
                         <span style={{ justifySelf: "start", background: "#2C3B37", color: "#E9EEE9", borderRadius: 14, padding: "7px 11px", fontSize: 12.5, maxWidth: "85%" }}>{x.demo[0]}</span>
                         <span style={{ justifySelf: "end", background: "#C8EE72", color: "#14231F", borderRadius: 14, padding: "7px 11px", fontSize: 12.5, maxWidth: "85%" }}>{x.demo[1]}</span>
@@ -340,8 +342,33 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
                       <div style={{ padding: 14 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><b>{x.t}</b>{x.b}</div>
                         <p style={{ fontSize: 13, color: "var(--ink-70)", margin: "6px 0 0", lineHeight: 1.5 }}>{x.d}</p>
+                        {x.href && <div style={{ fontSize: 13, fontWeight: 600, marginTop: 10 }}>Use this assistant →</div>}
                       </div>
-                    </div>
+                    </a>
+                  ))}
+                </div>
+                <style>{`.sidekick-card[href]:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(20,35,31,.10)}`}</style>
+              </section>
+
+              <section className="panel" style={{ marginTop: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <h2 style={{ margin: 0 }}>Ready-made assistants</h2>
+                  <a href="/dashboard/agent#presets" style={{ fontSize: 13 }}>Open the studio →</a>
+                </div>
+                <p style={{ color: "var(--ink-70)", fontSize: 14, margin: "4px 0 12px" }}>Pick the one closest to your business. It loads a complete setup; you only fill in a few details like delivery and opening hours.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 12 }}>
+                  {BUILTIN_PRESETS.filter((p) => p.key !== "general" && p.key !== "closer").map((p) => (
+                    <a key={p.key} href={`/dashboard/agent?preset=${p.key}`} className="sidekick-card"
+                      style={{ display: "block", color: "inherit", textDecoration: "none", border: "1px solid var(--line,#e7e7e3)", borderRadius: 12, overflow: "hidden", background: "#fff", transition: "transform .15s, box-shadow .15s" }}>
+                      <div style={{ background: "#14231F", padding: 12, display: "grid", gap: 6 }}>
+                        <span style={{ justifySelf: "start", background: "#2C3B37", color: "#E9EEE9", borderRadius: 12, padding: "6px 10px", fontSize: 12, maxWidth: "88%" }}>{p.demo[0]}</span>
+                        <span style={{ justifySelf: "end", background: "#C8EE72", color: "#14231F", borderRadius: 12, padding: "6px 10px", fontSize: 12, maxWidth: "88%" }}>{p.demo[1]}</span>
+                      </div>
+                      <div style={{ padding: 12 }}>
+                        <b>{p.emoji} {p.label}</b>
+                        <p style={{ fontSize: 12.5, color: "var(--ink-70)", margin: "4px 0 0", lineHeight: 1.45 }}>{p.blurb}</p>
+                      </div>
+                    </a>
                   ))}
                 </div>
               </section>
