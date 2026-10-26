@@ -258,8 +258,10 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
               })}</div>}
         </Row>
         {isMeta && (
-          <Row label="Refresh permissions" help="Meta can unexpectedly drop a connection. If replies stop sending or settings won't save, refresh permissions first — it takes one Facebook login.">
-            <a href="/api/meta/facebook/start" className="btn btn-line btn-sm">Refresh permissions</a>
+          <Row label="Refresh permissions" help={def.provider === "instagram"
+            ? "Your Instagram is connected through the Facebook Page it's linked to, so refreshing opens a Facebook login — that's expected. Pick the same Page and keep every permission ticked."
+            : "Meta can unexpectedly drop a connection. If replies stop sending or settings won't save, refresh permissions first — it takes one Facebook login."}>
+            <a href="/api/meta/facebook/start" className="btn btn-line btn-sm">{def.provider === "instagram" ? "Refresh via Facebook" : "Refresh permissions"}</a>
           </Row>
         )}
         <Row label="Disconnect" help="Removes the saved access so your assistant stops replying here at once. You can reconnect any time.">
