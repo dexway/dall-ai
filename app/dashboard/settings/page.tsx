@@ -5,6 +5,8 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { serverEnv } from "@/lib/env";
 import CopyButton from "./CopyButton";
+import { randomBytes, createHash } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 
 export const metadata = { title: "Payment settings" };
 
@@ -12,12 +14,18 @@ async function saveBank(formData: FormData) {
   "use server";
   const ctx = await requireWorkspace();
   if (!canManage(ctx)) redirect("/dashboard/settings?error=role");
-  const acct = String(formData.get("account_number") ?? "").replace(/\D/g, "");
-  if (acct && acct.length !== 10) redirect("/dashboard/settings?error=nuban");
-  const { error } = await ctx.db.from("business_payment_settings").update({
+  const db = supabaseAdmin();
+  const { data: cur } = await db.from("business_payment_settings").select("bank_name,account_name,account_number").eq("workspace_id", ctx.workspace.id).single();
+  // An empty account number box means "keep the current one" (it is shown masked).
+  const typed = String(formData.get("account_number") ?? "").replace(/\D/g, "");
+  if (typed && typed.length !== 10) redirect("/dashboard/settings?error=nuban");
+  const next = {
     bank_name: String(formData.get("bank_name") ?? "").trim() || null,
     account_name: String(formData.get("account_name") ?? "").trim() || null,
-    account_number: acct || null,
+    account_number: typed || cur?.account_number || null,
+  };
+  // Timer, bonus and instructions are safe to save straight away.
+  const { error } = await ctx.db.from("business_payment_settings").update({
     transfer_instructions: String(formData.get("transfer_instructions") ?? "").trim() || null,
     payment_deadline_hours: Math.min(168, Math.max(1, Number(formData.get("payment_deadline_hours")) || 24)),
     payment_window_minutes: Math.min(1440, Math.max(5, Number(formData.get("payment_window_minutes")) || 60)),
@@ -26,7 +34,30 @@ async function saveBank(formData: FormData) {
   }).eq("workspace_id", ctx.workspace.id);
   if (error) redirect("/dashboard/settings?error=save");
   revalidatePath("/dashboard/settings");
-  redirect("/dashboard/settings?saved=bank");
+
+  const changed = next.bank_name !== (cur?.bank_name ?? null) || next.account_name !== (cur?.account_name ?? null) || next.account_number !== (cur?.account_number ?? null);
+  if (!changed) redirect("/dashboard/settings?saved=bank");
+
+  // Where money goes only changes after the owner clicks a link sent to their login email,
+  // so someone who gets into the dashboard cannot divert customer payments.
+  if (!ctx.user.email) redirect("/dashboard/settings?error=noemail");
+  const token = randomBytes(24).toString("base64url");
+  await db.from("bank_change_requests").update({ status: "cancelled" }).eq("workspace_id", ctx.workspace.id).eq("status", "pending");
+  const { error: rErr } = await db.from("bank_change_requests").insert({
+    workspace_id: ctx.workspace.id, requested_by: ctx.user.id, ...next,
+    token_hash: createHash("sha256").update(token).digest("hex"),
+    expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+  });
+  if (rErr) redirect("/dashboard/settings?error=save");
+  const mailer = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  const nextPath = `/dashboard/settings/confirm-bank?t=${token}`;
+  const { error: mErr } = await mailer.auth.signInWithOtp({
+    email: ctx.user.email,
+    options: { shouldCreateUser: false, emailRedirectTo: `${serverEnv.siteUrl()}/auth/callback?next=${encodeURIComponent(nextPath)}` },
+  });
+  if (mErr) redirect("/dashboard/settings?error=mail");
+  await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, action: "bank.change_requested", entity: "bank", entity_id: ctx.workspace.id, details: { by: ctx.user.id, account_last4: next.account_number?.slice(-4) ?? null } });
+  redirect("/dashboard/settings?saved=bank_pending");
 }
 
 async function savePaystack(formData: FormData) {
@@ -101,15 +132,16 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const waCallback = `${serverEnv.siteUrl()}/api/webhooks/whatsapp`;
   const { data: wsRow } = await ctx.db.from("workspaces").select("business_profile").eq("id", ctx.workspace.id).single();
   const bp = (wsRow?.business_profile ?? {}) as Record<string, string | undefined>;
-  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", mode: "Your secret and public keys must both be test keys or both be live keys.", save: "Couldn't save. Try again.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
+  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", mode: "Your secret and public keys must both be test keys or both be live keys.", save: "Couldn't save. Try again.", mail: "We couldn't send the confirmation email. Wait a minute and try again.", noemail: "Your login has no email to confirm with.", bank_link: "That confirmation link is invalid, expired, or was opened from a different login. Save your bank details again to get a new one.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
 
   const psMode = s?.paystack_public_key?.startsWith("pk_live_") ? "live" : s?.paystack_public_key?.startsWith("pk_test_") ? "test" : null;
   const psStatus = !sec ? { t: "Not connected", c: "#5B6461", b: "#EEF0EE" }
     : !s?.paystack_enabled ? { t: "Connected · off at checkout", c: "#8A5A0B", b: "#FBF0DC" }
     : psMode === "live" ? { t: "Live · taking payments", c: "#1E7A45", b: "#E3F5EA" }
     : { t: "Test mode", c: "#1F4FD1", b: "#E6EEFF" };
+  const { data: pending } = await supabaseAdmin().from("bank_change_requests").select("account_number,expires_at").eq("workspace_id", ctx.workspace.id).eq("status", "pending").gt("expires_at", new Date().toISOString()).maybeSingle();
   const bankReady = Boolean(s?.bank_name && s?.account_number && s?.account_name);
-  const savedMsg: Record<string, string> = { bank: "Bank details saved. Your assistant uses them from the next order.", paystack: "Paystack settings saved.", whatsapp: "WhatsApp saved.", profile: "Business details saved." };
+  const savedMsg: Record<string, string> = { bank: "Saved.", bank_pending: "Check your email. We sent a confirmation link to your login email; your new bank details go live only after you click it (within 30 minutes). Until then customers keep getting your current account.", bank_confirmed: "Bank details confirmed. Your assistant uses them from the next order.", paystack: "Paystack settings saved.", whatsapp: "WhatsApp saved.", profile: "Business details saved." };
 
   return (
     <>
@@ -128,13 +160,13 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <div style={{ background: "#14231F", borderRadius: 12, padding: 12, margin: "4px 0 6px" }}>
             <div style={{ fontSize: 11, color: "#9fb3ab", marginBottom: 6, fontFamily: "var(--f-mono, monospace)" }}>What customers see in the chat</div>
             <div style={{ background: "#21352F", color: "#F4F0E7", borderRadius: "14px 14px 4px 14px", padding: "10px 12px", fontSize: 13.5, lineHeight: 1.5 }}>
-              Transfer <b>₦140,000</b> to <b>{s?.bank_name || "your bank"}</b> · <span style={{ fontFamily: "monospace" }}>{s?.account_number || "0000000000"}</span> · {s?.account_name || "your account name"}. Use <span style={{ fontFamily: "monospace" }}>MAM-7KQ2X9PD</span> as the narration. You have {s?.payment_window_minutes ?? 60} mins — then send the screenshot here 📎
+              Transfer <b>₦140,000</b> to <b>{s?.bank_name || "your bank"}</b> · <span style={{ fontFamily: "monospace" }}>{s?.account_number ? `••••••${s.account_number.slice(-4)}` : "0000000000"}</span> · {s?.account_name || "your account name"}. Use <span style={{ fontFamily: "monospace" }}>MAM-7KQ2X9PD</span> as the narration. You have {s?.payment_window_minutes ?? 60} mins — then send the screenshot here 📎
               {(s?.early_pay_bonus_pct ?? 0) > 0 && <> Pay within the time and get {s?.early_pay_bonus_pct}% off.</>}
             </div>
           </div>
           <div className="form-grid">
             <label className="field"><span>Bank</span><input id="bank_name" name="bank_name" className="input" defaultValue={s?.bank_name ?? ""} placeholder="e.g. GTBank, Moniepoint, Opay" /></label>
-            <label className="field"><span>Account number</span><input id="account_number" name="account_number" className="input mono" inputMode="numeric" maxLength={10} defaultValue={s?.account_number ?? ""} /></label>
+            <label className="field"><span>Account number</span><input id="account_number" name="account_number" className="input mono" inputMode="numeric" maxLength={10} autoComplete="off" placeholder={s?.account_number ? `••••••${s.account_number.slice(-4)} · type a new one to change` : "10-digit account number"} /></label>
           </div>
           <label className="field"><span>Account name</span><input id="account_name" name="account_name" className="input" defaultValue={s?.account_name ?? ""} /></label>
           <label className="field"><span>Extra instructions</span><textarea id="transfer_instructions" name="transfer_instructions" className="input" defaultValue={s?.transfer_instructions ?? ""} placeholder="Use your order reference as the narration." /></label>
@@ -143,6 +175,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <label className="field"><span>Early-payment bonus (%)</span><input id="early_pay_bonus_pct" name="early_pay_bonus_pct" type="number" min={0} max={15} className="input" defaultValue={s?.early_pay_bonus_pct ?? 0} />
             <small>Customers who pay inside the countdown get this percentage off. 0 turns it off. Max 15%.</small></label>
           <input type="hidden" name="payment_deadline_hours" value={s?.payment_deadline_hours ?? 24} />
+          {pending && <div className="notice" role="status" style={{ margin: 0, background: "#FBF0DC", color: "#8A5A0B" }}>A change to account ••••••{pending.account_number?.slice(-4) ?? "----"} is waiting for email confirmation (expires {new Date(pending.expires_at).toLocaleTimeString("en-NG", { timeStyle: "short" })}). Customers still get your current account.</div>}
+          <small style={{ color: "var(--ink-70)" }}>🔒 Changing your bank, account number or account name needs confirmation from your login email, so nobody can redirect your customers&apos; payments.</small>
           <div><button className="btn btn-ink">Save bank details</button></div>
         </form>
 
