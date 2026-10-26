@@ -59,8 +59,8 @@ export default function Landing() {
             </div>
 
             <div className="hero-visual">
-            <div className="hero-photo" role="img" aria-label="A Lagos business owner walks through his busy workshop, checking his phone as his assistant handles customers">
-              <span className="photo-tag">● On the factory floor · Amaka is on the phones</span>
+            <div className="hero-photo" role="img" aria-label="The owner of Mama Put Kitchen holds up her phone, pleased, as her assistant takes a catering order on WhatsApp while her staff cook">
+              <span className="photo-tag">● Mama Put Kitchen · Amaka just sold ₦140,000 of jollof trays</span>
             </div>
             <div className="scene" aria-label="Example conversation between a customer and an assistant">
               <div className="scene-head">
