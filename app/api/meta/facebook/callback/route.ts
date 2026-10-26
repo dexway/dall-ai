@@ -52,7 +52,7 @@ export async function GET(req: Request) {
 
     const enc = encryptSecret(p.access_token);
     await db.from("channel_connections").upsert({
-      workspace_id: wsId, provider: "facebook", external_id: p.id, display_name: p.name, access_token_enc: enc, status: "active",
+      workspace_id: wsId, provider: "facebook", external_id: p.id, display_name: p.name, access_token_enc: enc, status: "active", last_error: null,
     }, { onConflict: "provider,external_id" });
     pagesSaved++;
 
@@ -60,7 +60,7 @@ export async function GET(req: Request) {
     if (ig) {
       await db.from("channel_connections").upsert({
         workspace_id: wsId, provider: "instagram", external_id: ig.id,
-        display_name: ig.username ? `@${ig.username}` : null, access_token_enc: enc, status: "active",
+        display_name: ig.username ? `@${ig.username}` : null, access_token_enc: enc, status: "active", last_error: null,
       }, { onConflict: "provider,external_id" });
       igSaved++;
     }

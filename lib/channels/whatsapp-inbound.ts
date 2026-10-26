@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { decryptSecret } from "@/lib/crypto";
 import { sendText, type Inbound } from "@/lib/channels/whatsapp-parse";
 import { handleAgentMessage } from "@/lib/channels/agent-message";
+import { flagIfAuthFailure } from "@/lib/channels/health";
 
 const UNSUPPORTED = "I can read text messages for now. Please type your question, and I will help you.";
 
@@ -13,7 +14,10 @@ export async function handleWhatsAppInbound(msg: Inbound): Promise<void> {
   if (!conn) return; // number not connected to any business
 
   const token = decryptSecret(conn.access_token_enc);
-  const reply = (text: string) => sendText({ accessToken: token, phoneNumberId: msg.phoneNumberId, to: msg.from, text });
+  const reply = async (text: string) => {
+    try { await sendText({ accessToken: token, phoneNumberId: msg.phoneNumberId, to: msg.from, text }); }
+    catch (e) { await flagIfAuthFailure("whatsapp", msg.phoneNumberId, e); throw e; }
+  };
 
   if (!msg.text) { await reply(UNSUPPORTED); return; }
   await handleAgentMessage({

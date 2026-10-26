@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { decryptSecret } from "@/lib/crypto";
 import { sendMetaText } from "@/lib/meta";
 import { handleAgentMessage } from "@/lib/channels/agent-message";
+import { flagIfAuthFailure } from "@/lib/channels/health";
 import type { MetaInbound } from "@/lib/channels/meta-parse";
 
 const UNSUPPORTED = "I can read text messages for now. Please type your question, and I will help you.";
@@ -14,7 +15,10 @@ export async function handleMetaInbound(msg: MetaInbound): Promise<void> {
   if (!conn) return; // this Page or account is not connected to any business
 
   const token = decryptSecret(conn.access_token_enc);
-  const reply = (text: string) => sendMetaText({ pageToken: token, recipientId: msg.senderId, text });
+  const reply = async (text: string) => {
+    try { await sendMetaText({ pageToken: token, recipientId: msg.senderId, text }); }
+    catch (e) { await flagIfAuthFailure(msg.channel, msg.accountId, e); throw e; }
+  };
 
   if (!msg.text) { await reply(UNSUPPORTED); return; }
   await handleAgentMessage({
