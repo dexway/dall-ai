@@ -105,8 +105,10 @@ async function freeCall(req: GatewayRequest, model: string, rate: RateCard, maxT
   } catch (err) {
     if (err instanceof GatewayError) { await log(false, null, null, err.code); throw err; }
     const status = (err as { status?: number }).status;
-    await log(false, null, null, `provider_error_${status ?? "network"}`);
-    console.error("[gateway] provider error", { status, workspace: req.workspaceId, feature: req.feature, model, detail: String((err as { message?: string }).message ?? "").slice(0, 400) });
+    // Keep the provider's explanation (billing, bad request, auth) in the usage log; it never contains our key.
+    const detail = String((err as { message?: string }).message ?? "").slice(0, 300);
+    await log(false, null, null, `provider_error_${status ?? "network"}${detail ? `: ${detail}` : ""}`);
+    console.error("[gateway] provider error", { status, workspace: req.workspaceId, feature: req.feature, model, detail });
     throw new GatewayError("PROVIDER_ERROR", 502, "The assistant could not reply just now. Please try again.");
   }
 }
