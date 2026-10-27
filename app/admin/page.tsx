@@ -72,7 +72,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
 
   return (
     <div className="main" style={{ maxWidth: 1200, margin: "0 auto" }}>
-      <div className="page-head"><div><h1>{BRAND.name} platform admin</h1><p>Last 30 days. Costs are estimates from the rate card; reconcile against the Anthropic Console invoice.</p></div></div>
+      <div className="page-head"><div><h1>{BRAND.name} platform admin</h1><p>Last 30 days. Costs are estimates from the rate card; reconcile against the Anthropic Console invoice.</p></div><a className="btn btn-line" href="/admin/creative">Creative Director models & quotas →</a></div>
       {sp.error && <div className="notice notice-bad">Enter a non-zero amount (max 100,000) and a reason.</div>}
       <div className="stats">
         <div className="stat"><span>Workspaces</span><b>{wss?.length ?? 0}</b></div>

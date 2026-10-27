@@ -16,17 +16,18 @@ const AUDIENCES: { value: string; label: string }[] = [
 
 const CTA: Record<string, string> = { whatsapp: "Send WhatsApp message", messenger: "Send message", instagram: "Send message" };
 
-export default function AdBuilder({ accounts, pages, items, action }: {
+export default function AdBuilder({ accounts, pages, items, action, initialMessage, initialHeadline }: {
   accounts: Account[]; pages: Page[]; items: Item[];
   action: (formData: FormData) => void;
+  initialMessage?: string; initialHeadline?: string;
 }) {
   const [accountId, setAccountId] = useState(accounts[0]?.ad_account_id ?? "");
   const [itemId, setItemId] = useState(items[0]?.id ?? "");
   const [destination, setDestination] = useState("whatsapp");
   const [budget, setBudget] = useState(2000);
-  const [message, setMessage] = useState("Chat with us now to order — fast replies, pay by transfer.");
+  const [message, setMessage] = useState(initialMessage?.slice(0, 600) || "Chat with us now to order — fast replies, pay by transfer.");
   const [audience, setAudience] = useState("everyone");
-  const [headline, setHeadline] = useState("");
+  const [headline, setHeadline] = useState(initialHeadline?.slice(0, 40) ?? "");
   const [upload, setUpload] = useState<string | null>(null);
 
   const account = accounts.find((a) => a.ad_account_id === accountId) ?? accounts[0];

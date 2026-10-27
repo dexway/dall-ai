@@ -250,7 +250,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       ) : (
         <section className="panel">
           <h2>Boost a product</h2>
-          <AdBuilder accounts={accounts.map((a) => ({ ad_account_id: a.ad_account_id, name: a.name, currency: a.currency }))} pages={(pages ?? []).map((p) => ({ external_id: p.external_id, display_name: p.display_name }))} items={itemsForBuilder} action={launchAd} />
+          <AdBuilder accounts={accounts.map((a) => ({ ad_account_id: a.ad_account_id, name: a.name, currency: a.currency }))} pages={(pages ?? []).map((p) => ({ external_id: p.external_id, display_name: p.display_name }))} items={itemsForBuilder} action={launchAd} initialMessage={sp.prefill} initialHeadline={sp.headline} />
         </section>
       )}
 

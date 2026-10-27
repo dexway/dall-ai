@@ -171,3 +171,8 @@ export function describeForAgent(e: Pick<MessageEvent, "text" | "attachments">):
   const what: Record<string, string> = { image: "a photo", video: "a video", audio: "a voice note", document: "a document", sticker: "a sticker", location: "their location", file: "a file" };
   return `[The customer sent ${what[a.type] ?? "an attachment"}${a.caption ? `: ${a.caption}` : ""}. You can't see it. If it looks like a payment receipt, say the team will check it; otherwise ask them to describe what they need in text.]`;
 }
+
+/** A customer asking to stop marketing messages ("STOP", "unsubscribe", "stop offers"...). */
+export function isOptOut(text: string): boolean {
+  return /^\s*(stop|unsubscribe|opt[\s-]?out|stop (offers|messages|promos?|broadcasts?)|no more (offers|messages))\s*[.!]*\s*$/i.test(text ?? "");
+}

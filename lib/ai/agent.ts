@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { AI } from "@/lib/config";
 import { formatNaira, QuoteError } from "@/lib/money";
 import { createCheckout, checkoutUrl } from "@/lib/orders";
+import { promoUnavailable, describePromo, type Promo } from "@/lib/promo";
 
 export type AgentRow = {
   id: string; workspace_id: string; name: string; role_title: string; persona: string;
@@ -39,6 +40,7 @@ const tools: Anthropic.Tool[] = [
         items: { type: "array", items: { type: "object", required: ["item_id", "quantity"], properties: { item_id: { type: "string" }, quantity: { type: "integer", minimum: 1 } } } },
         customer_name: { type: "string" }, customer_phone: { type: "string" }, customer_email: { type: "string" },
         discount_pct: { type: "number", description: "Only within your allowed limit, and only if the customer asked." },
+        promo_code: { type: "string", description: "A live promotion code from list_promotions that fits this order. Replaces discount_pct." },
       },
     },
   },
@@ -63,14 +65,24 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: "list_promotions",
+    description: "List the business's live promotions (code, what it gives, minimum order, end date). Check before quoting a total, so you can mention a promotion that fits.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "record_marketing_consent",
+    description: "Record whether the customer agreed to receive offers and new-product messages from this business. Only call after asking them and hearing a clear yes or no.",
+    input_schema: { type: "object", required: ["agreed"], properties: { agreed: { type: "boolean" } } },
+  },
+  {
     name: "handoff_to_human",
     description: "Hand this chat to a team member and stop replying. Use when the customer asks for a person, is upset or complaining, asks about a refund, or needs something you cannot do.",
     input_schema: { type: "object", required: ["reason"], properties: { reason: { type: "string", description: "One line for the team" } } },
   },
 ];
 
-function systemPrompt(agent: AgentRow, businessName: string, profile: string) {
-  return `You are ${agent.name}, the ${agent.role_title} for ${businessName}, a business in Lagos, Nigeria.
+function systemPrompt(agent: AgentRow, businessName: string, profile: string, upsell = true) {
+  return (`You are ${agent.name}, the ${agent.role_title} for ${businessName}, a business in Lagos, Nigeria.
 Personality: ${agent.persona}
 Languages: reply in whichever of ${agent.languages.join(", ")} the customer uses. Nigerian Pidgin is welcome when they use it.
 
@@ -90,8 +102,13 @@ Rules you never break:
 - Never ask for card numbers, PINs, OTPs or banking passwords.
 - If you cannot help, say a team member will follow up.
 - Leads: once you know what the customer wants, call save_lead. Before taking a phone number or email for follow-up, ask if it's okay for the team to contact them, and set consent_contact from their answer. Never invent contact details.
+- Promotions: call list_promotions before giving a total. If one fits the order, mention it once and apply its code in create_checkout. Never invent a code or a promotion.
+- {UPSELL}
+- Offers by message: after a purchase or a warm chat, you may ask once if they'd like to hear about new products and offers here. Record the answer with record_marketing_consent. Never ask twice, never pressure.
 - Hand over with handoff_to_human when the customer asks for a person, complains, wants a refund, or you can't help. After handing over, tell them a team member will reply here soon, and stop selling.
-Keep replies short and friendly, like a WhatsApp message.`;
+Keep replies short and friendly, like a WhatsApp message.`).replace("{UPSELL}", upsell
+    ? "Add-ons: once the customer has chosen, you may suggest ONE item from search_catalogue that genuinely goes with it (a drink with food, a case with a phone), with its price. If they say no, drop it."
+    : "Don't suggest extra items unless the customer asks.");
 }
 
 async function runTool(name: string, input: Record<string, unknown>, ctx: { agent: AgentRow; businessName: string; conversationId: string }) {
@@ -120,6 +137,7 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         maxDiscountPct: Number(ctx.agent.max_discount_pct),
         items: (input.items as { item_id: string; quantity: number }[]) ?? [],
         discountPct: input.discount_pct ? Number(input.discount_pct) : 0,
+        promoCode: typeof input.promo_code === "string" && input.promo_code.trim() ? input.promo_code : undefined,
         customer: { name: input.customer_name as string, phone: input.customer_phone as string, email: input.customer_email as string },
       });
       const { data: bank } = await db.from("business_payment_settings").select("bank_name,account_name,account_number,transfer_instructions,early_pay_bonus_pct").eq("workspace_id", ws).single();
@@ -128,6 +146,7 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         lines: quote.lines.map((l) => `${l.quantity} × ${l.name} @ ${formatNaira(l.unit_price_kobo)} = ${formatNaira(l.line_total_kobo)}`),
         discount: quote.discount_kobo ? formatNaira(quote.discount_kobo) : undefined,
         total: formatNaira(quote.total_kobo),
+        ...(order.promo_code ? { promotion_applied: order.promo_code } : {}),
       };
       if (bank?.account_number) {
         const mins = order.expires_at ? Math.max(1, Math.round((new Date(order.expires_at).getTime() - Date.now()) / 60_000)) : null;
@@ -145,6 +164,19 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         };
       }
       return { ...base, checkout_link: checkoutUrl(order.public_token), next_step: "Share the checkout link; the customer pays there." };
+    }
+    if (name === "list_promotions") {
+      const { data } = await db.from("promotions").select("*").eq("workspace_id", ws).eq("active", true).limit(20);
+      const live = ((data ?? []) as Promo[]).filter((p) => !promoUnavailable(p));
+      if (!live.length) return { promotions: [], note: "No promotions running. Don't mention any." };
+      return { promotions: live.map((p) => ({ code: p.code, summary: describePromo(p), limited_to_item_ids: p.item_ids ?? undefined })) };
+    }
+    if (name === "record_marketing_consent") {
+      const agreed = input.agreed === true;
+      await db.from("conversations").update(agreed
+        ? { marketing_consent: true, consent_at: new Date().toISOString(), opted_out_at: null }
+        : { marketing_consent: false }).eq("id", ctx.conversationId);
+      return { recorded: true, agreed, next_step: agreed ? "Thank them; say they can reply STOP any time to stop offers." : "Say no problem, and carry on." };
     }
     if (name === "save_lead") {
       const { data: conv } = await db.from("conversations").select("channel,ad_id,outcome").eq("id", ctx.conversationId).single();
@@ -188,7 +220,8 @@ export async function runAgentTurn(args: {
   agent: AgentRow; businessName: string; conversationId: string; history: Anthropic.MessageParam[]; userText: string; profile?: string;
 }): Promise<string> {
   const messages: Anthropic.MessageParam[] = [...args.history.slice(-AI.maxHistoryMessages), { role: "user", content: args.userText }];
-  const system = systemPrompt(args.agent, args.businessName, args.profile ?? "");
+  const { data: mk } = await supabaseAdmin().from("marketing_settings").select("upsell_enabled").eq("workspace_id", args.agent.workspace_id).maybeSingle();
+  const system = systemPrompt(args.agent, args.businessName, args.profile ?? "", mk?.upsell_enabled ?? true);
 
   for (let step = 0; step <= AI.maxToolCallsPerTurn; step++) {
     const res = await gatewayCall({

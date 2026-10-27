@@ -11,6 +11,8 @@ const LINKS = [
   { href: "/dashboard/orders", label: "Orders" },
   { href: "/dashboard/payments", label: "Payments to check" },
   { href: "/dashboard/connect", label: "Channels" },
+  { href: "/dashboard/marketing", label: "Marketing" },
+  { href: "/dashboard/studio", label: "Creative Director" },
   { href: "/dashboard/ads", label: "Ads" },
   { href: "/dashboard/settings", label: "Payment settings" },
   { href: "/dashboard/billing", label: "Usage & billing" },

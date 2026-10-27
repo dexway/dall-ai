@@ -1,0 +1,135 @@
+// MOCKED: Higgsfield and Claude are never called for real here; a fake fetch records requests.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+import { applyPromo, promoUnavailable, describePromo, type Promo } from "../lib/promo.ts";
+import { buildQuote } from "../lib/money.ts";
+import { unpaidNudgeDue, quietLeadDue, broadcastEligibility } from "../lib/marketing-rules.ts";
+import { isOptOut } from "../lib/channels/events.ts";
+import { ResearchReport, enforceSources, missingBrief, parseJson, Strategy, CalendarItem, ProductionSpec } from "../lib/creative/schemas.ts";
+import { estimateCost, providerInput, quotaMessage, canMoveItem, EDITABLE_BY_AI, jobStatusFrom, NOT_CHARGED } from "../lib/creative/rules.ts";
+import { hfSubmit, hfOutputs, verifyHfWebhook, HfError } from "../lib/creative/higgsfield.ts";
+
+const cat = [{ id: "a", name: "Jollof tray", price_kobo: 3_500_000, intro_price_kobo: null, stock: null, active: true },
+  { id: "b", name: "Zobo", price_kobo: 200_000, intro_price_kobo: null, stock: null, active: true }];
+const promo = (o: Partial<Promo> = {}): Promo => ({ id: "p", code: "JOLLOF10", title: "Weekend deal", kind: "percent", value: 10, min_order_kobo: 0, max_discount_kobo: null,
+  item_ids: null, starts_at: "2026-01-01T00:00:00Z", ends_at: null, max_uses: null, uses: 0, active: true, ...o });
+
+test("promotions: percent, fixed, item-limited, min order, caps and expiry are enforced server-side", () => {
+  const q = buildQuote([{ item_id: "a", quantity: 1 }, { item_id: "b", quantity: 2 }], cat);
+  assert.equal(applyPromo(q, promo()).discount_kobo, 390_000);
+  assert.equal(applyPromo(q, promo({ kind: "fixed", value: 5_000_000 })).total_kobo, 0);           // never below zero
+  assert.equal(applyPromo(q, promo({ item_ids: ["b"] })).discount_kobo, 40_000);                     // only the zobo
+  assert.equal(applyPromo(q, promo({ max_discount_kobo: 100_000 })).discount_kobo, 100_000);
+  assert.throws(() => applyPromo(q, promo({ min_order_kobo: 5_000_000 })), /at least/);
+  assert.throws(() => applyPromo(q, promo({ ends_at: "2026-02-01T00:00:00Z" }), new Date("2026-03-01")), /ended/);
+  assert.throws(() => applyPromo(q, promo({ max_uses: 5, uses: 5 })), /fully used/);
+  assert.throws(() => applyPromo(q, promo({ item_ids: ["zzz"] })), /doesn't cover/);
+  assert.equal(promoUnavailable(promo({ starts_at: "2099-01-01T00:00:00Z" })), "That promotion hasn't started yet.");
+  assert.match(describePromo(promo({ min_order_kobo: 1_000_000 })), /10% off the order on orders from ₦10,000 \(code JOLLOF10\)/);
+});
+
+test("follow-ups: unpaid reminder timing and quiet-chat rules respect windows, takeovers and opt-outs", () => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const chat = { channel: "whatsapp", last_inbound_at: new Date(now - 30 * 60_000).toISOString(), last_message_at: null, ai_paused: false, opted_out_at: null, outcome: "open" };
+  const order = { created_at: new Date(now - 25 * 60_000).toISOString(), expires_at: new Date(now + 15 * 60_000).toISOString(), status: "awaiting_payment", pay_on_delivery: false };
+  assert.equal(unpaidNudgeDue(order, chat, 20, now), true);
+  assert.equal(unpaidNudgeDue(order, chat, 30, now), false);                                      // too soon
+  assert.equal(unpaidNudgeDue({ ...order, expires_at: new Date(now + 60_000).toISOString() }, chat, 20, now), false); // about to expire
+  assert.equal(unpaidNudgeDue(order, { ...chat, ai_paused: true }, 20, now), false);
+  assert.equal(unpaidNudgeDue(order, { ...chat, channel: "web" }, 20, now), false);
+  assert.equal(unpaidNudgeDue({ ...order, pay_on_delivery: true }, chat, 20, now), false);
+  const quiet = { ...chat, last_inbound_at: new Date(now - 21 * 3600_000).toISOString() };
+  assert.equal(quietLeadDue(quiet, "assistant", 20, now), true);
+  assert.equal(quietLeadDue(quiet, "user", 20, now), false);                                      // we owe them a reply, not a nudge
+  assert.equal(quietLeadDue({ ...quiet, last_inbound_at: new Date(now - 24 * 3600_000).toISOString() }, "assistant", 20, now), false); // window closed
+  assert.equal(quietLeadDue({ ...quiet, opted_out_at: "2026-10-01T00:00:00Z" }, "assistant", 20, now), false);
+  assert.equal(quietLeadDue({ ...quiet, outcome: "won" }, "assistant", 20, now), false);
+});
+
+test("broadcast audience: consent required, STOP wins, Messenger/IG limited to the 24h window", () => {
+  const now = Date.now();
+  const base = { channel: "facebook", marketing_consent: true, opted_out_at: null, last_inbound_at: new Date(now - 3600_000).toISOString() };
+  assert.equal(broadcastEligibility(base, "facebook", now), "send");
+  assert.equal(broadcastEligibility({ ...base, last_inbound_at: new Date(now - 30 * 3600_000).toISOString() }, "facebook", now), "skip_window");
+  assert.equal(broadcastEligibility({ ...base, channel: "whatsapp", last_inbound_at: null }, "whatsapp", now), "send");   // template any time
+  assert.equal(broadcastEligibility({ ...base, marketing_consent: false }, "facebook", now), "skip_consent");
+  assert.equal(broadcastEligibility({ ...base, opted_out_at: new Date().toISOString() }, "facebook", now), "skip_consent");
+  for (const t of ["STOP", "stop", " Unsubscribe ", "opt out", "Stop offers!", "no more messages"]) assert.equal(isOptOut(t), true, t);
+  for (const t of ["don't stop", "stop by tomorrow?", "how much"]) assert.equal(isOptOut(t), false, t);
+});
+
+const claim = (sources: string[] = []) => ({ text: "x", sources, confidence: "high" as const });
+test("research: citations to pages the tools never returned are removed and unsupported claims become hypotheses", () => {
+  const raw = ResearchReport.parse({ overview: claim(["https://a.com/post", "https://invented.example/x"]), positioning: claim([]),
+    competitors: [{ name: "Rival", sources: ["https://a.com/post/"], confidence: "high" }], trends: [{ ...claim(["https://nope.io"]), date: "2026-10" }] });
+  const { report, dropped } = enforceSources(raw, new Set(["https://a.com/post"]));
+  assert.equal(dropped, 2);
+  assert.deepEqual(report.overview.sources, ["https://a.com/post"]);
+  assert.equal(report.competitors[0].sources.length, 1);                                         // trailing slash normalised
+  assert.equal(report.trends[0].confidence, "low");
+  assert.equal(report.positioning.confidence, "low");
+});
+
+test("brief gaps, JSON validation and schema strictness", () => {
+  assert.deepEqual(missingBrief({ industry: "food" }, [{ kind: "competitor", accepted: true }, { kind: "competitor", accepted: false }]).length, 6);
+  assert.equal(parseJson(Strategy, "no json here").ok, false);
+  const bad = parseJson(CalendarItem, '{"planned_date":"tomorrow","platform":"myspace"}');
+  assert.equal(bad.ok, false);
+  const spec = ProductionSpec.safeParse({ objective: "o", prompt: "p", aspect_ratio: "9:16", output: "video", duration_seconds: 500 });
+  assert.equal(spec.success, false);                                                             // 500s rejected before any provider call
+});
+
+test("costs: per-image and per-second pricing, capped duration, variations; only allowed params are sent", () => {
+  assert.equal(estimateCost({ unit: "image", usd_per_unit: 0.0032, max_seconds: null }, { variations: 3 }), 0.0096);
+  assert.equal(estimateCost({ unit: "second", usd_per_unit: 0.112, max_seconds: 10 }, { duration_seconds: 30 }), 1.12);
+  const input = providerInput({ allowed_params: ["prompt", "aspect_ratio"], max_seconds: null }, { prompt: "jollof", aspect_ratio: "1:1", negative: "text", variations: 2 });
+  assert.deepEqual(input, { prompt: "jollof", aspect_ratio: "1:1" });
+});
+
+test("quota errors name the exact limit, usage and reset; unconfigured media spend is off", () => {
+  const m = quotaMessage("QUOTA:org:month:10.000000:9.500000", "media_usd", new Date("2026-10-27T00:00:00Z"));
+  assert.match(m.message, /your business's monthly media generation budget: \$9\.50 of \$10\.00 used, \$0\.50 left\. It resets on 1 Nov 2026/);
+  assert.match(quotaMessage("NOT_CONFIGURED:media_usd", "media_usd").message, /switched off until a Dall AI admin sets a spending cap/);
+});
+
+test("approval state machine: no skipping approval, approved items locked from AI rewrites", () => {
+  assert.equal(canMoveItem("awaiting_approval", "generation_queued"), false);
+  assert.equal(canMoveItem("approved", "generation_queued"), true);
+  assert.equal(canMoveItem("rejected", "approved"), false);
+  assert.equal(canMoveItem("generated", "completed"), true);
+  assert.equal(EDITABLE_BY_AI.has("approved"), false);
+  assert.equal(jobStatusFrom("in_progress"), "in_progress");
+  assert.equal(jobStatusFrom("weird"), null);
+  assert.ok(NOT_CHARGED.has("nsfw") && !NOT_CHARGED.has("completed"));
+});
+
+test("Higgsfield: Key auth + Idempotency-Key on every submit; timeouts are ambiguous, 4xx are not", async () => {
+  let seen: { url: string; headers: Record<string, string>; body: unknown } | null = null;
+  const ok = (async (url: string, init: RequestInit) => { seen = { url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) };
+    return new Response(JSON.stringify({ status: "queued", request_id: "req_1", status_url: "https://api.higgsfield.ai/requests/req_1/status" }), { status: 200 }); }) as unknown as typeof fetch;
+  const r = await hfSubmit({ keyId: "kid", secret: "sec", endpoint: "higgsfield-ai/soul/v2/standard", input: { prompt: "p" }, idempotencyKey: "gen:abc", webhookUrl: "https://dall-ai.vercel.app/api/webhooks/higgsfield", fetcher: ok });
+  assert.equal(r.request_id, "req_1");
+  assert.equal(seen!.headers.Authorization, "Key kid:sec");
+  assert.equal(seen!.headers["Idempotency-Key"], "gen:abc");
+  assert.match(seen!.url, /^https:\/\/api\.higgsfield\.ai\/higgsfield-ai\/soul\/v2\/standard\?hf_webhook=/);
+  await assert.rejects(hfSubmit({ keyId: "k", secret: "s", endpoint: "m", input: {}, idempotencyKey: "x", fetcher: (async () => { throw new Error("timeout"); }) as unknown as typeof fetch }),
+    (e: unknown) => e instanceof HfError && e.ambiguous);
+  await assert.rejects(hfSubmit({ keyId: "k", secret: "s", endpoint: "m", input: {}, idempotencyKey: "x", fetcher: (async () => new Response("bad prompt", { status: 422 })) as typeof fetch }),
+    (e: unknown) => e instanceof HfError && !e.ambiguous && e.status === 422);
+  await assert.rejects(hfSubmit({ keyId: "k", secret: "s", endpoint: "../../evil", input: {}, idempotencyKey: "x", fetcher: ok }), /Invalid model endpoint/);
+  assert.deepEqual(hfOutputs({ images: [{ url: "https://x/1.png" }], video: { url: "https://x/v.mp4", content_type: "video/mp4" } }).length, 2);
+});
+
+test("Higgsfield webhooks: Standard Webhooks signatures verified, tampering and stale timestamps refused", () => {
+  const secretRaw = Buffer.from("super-secret-key-bytes");
+  const secret = `whsec_${secretRaw.toString("base64")}`;
+  const ts = Math.floor(Date.now() / 1000).toString();
+  const body = JSON.stringify({ request_id: "req_1", status: "completed" });
+  const sig = createHmac("sha256", secretRaw).update(`msg_1.${ts}.${body}`).digest("base64");
+  assert.equal(verifyHfWebhook({ secret, id: "msg_1", timestamp: ts, signature: `v1,${sig}`, body }), true);
+  assert.equal(verifyHfWebhook({ secret, id: "msg_1", timestamp: ts, signature: `v1,bad v1,${sig}`, body }), true);       // any entry may match
+  assert.equal(verifyHfWebhook({ secret, id: "msg_1", timestamp: ts, signature: `v1,${sig}`, body: body + " " }), false);
+  assert.equal(verifyHfWebhook({ secret, id: "msg_1", timestamp: String(Number(ts) - 600), signature: `v1,${sig}`, body }), false);
+  assert.equal(verifyHfWebhook({ secret: "", id: "msg_1", timestamp: ts, signature: `v1,${sig}`, body }), false);
+});

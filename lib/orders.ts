@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { buildQuote, orderReference, QuoteError, type CatalogueRow } from "@/lib/money";
 import { serverEnv } from "@/lib/env";
 import { earlyPayAmount } from "@/lib/early-pay";
+import { applyPromo, type Promo } from "@/lib/promo";
 
 export type CheckoutInput = {
   workspaceId: string;
@@ -12,6 +13,7 @@ export type CheckoutInput = {
   maxDiscountPct: number;
   items: { item_id: string; quantity: number }[];
   discountPct?: number;
+  promoCode?: string;
   customer: { name?: string; phone?: string; email?: string };
 };
 
@@ -22,14 +24,22 @@ export async function createCheckout(input: CheckoutInput) {
   const { data: rows, error } = await db.from("catalogue_items")
     .select("id,name,price_kobo,intro_price_kobo,stock,active").eq("workspace_id", input.workspaceId).in("id", ids);
   if (error) throw error;
-  const quote = buildQuote(input.items, (rows ?? []) as CatalogueRow[], {
-    discount_pct: input.discountPct ?? 0, max_discount_pct: input.maxDiscountPct,
+  let quote = buildQuote(input.items, (rows ?? []) as CatalogueRow[], {
+    discount_pct: input.promoCode ? 0 : input.discountPct ?? 0, max_discount_pct: input.maxDiscountPct,
   });
+  // A promotion replaces the assistant's own discount. The server checks it and does the maths.
+  let promo: Promo | null = null;
+  if (input.promoCode) {
+    const { data: p } = await db.from("promotions").select("*").eq("workspace_id", input.workspaceId).eq("code", input.promoCode.trim().toUpperCase()).maybeSingle();
+    if (!p) throw new QuoteError("That promo code isn't valid for this business.");
+    promo = p as Promo;
+    quote = applyPromo(quote, promo);
+  }
 
   const basket = JSON.stringify([...quote.lines].sort((a, b) => a.item_id.localeCompare(b.item_id)).map((l) => [l.item_id, l.quantity]));
-  const idem = createHash("sha256").update(`${input.conversationId ?? "direct"}|${basket}|${quote.discount_kobo}`).digest("hex").slice(0, 40);
+  const idem = createHash("sha256").update(`${input.conversationId ?? "direct"}|${basket}|${quote.discount_kobo}|${promo?.code ?? ""}`).digest("hex").slice(0, 40);
 
-  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at")
+  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code")
     .eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).maybeSingle();
   if (existing.data) return { order: existing.data, quote, reused: true };
 
@@ -50,15 +60,22 @@ export async function createCheckout(input: CheckoutInput) {
   const windowMs = input.conversationId ? (settings?.payment_window_minutes ?? 60) * 60_000 : (settings?.payment_deadline_hours ?? 24) * 3600_000;
   const expires = new Date(Date.now() + windowMs).toISOString();
 
+  // Claim one use of a limited promotion atomically, only for a brand-new order.
+  if (promo) {
+    const { data: claimed } = await db.rpc("claim_promo_use", { p_promo: promo.id });
+    if (!claimed) throw new QuoteError("That promotion has just been fully used or has ended.");
+  }
+
   for (let attempt = 0; attempt < 3; attempt++) {
     const reference = orderReference(input.workspaceName);
     const { data: order, error: oErr } = await db.from("orders").insert({
       workspace_id: input.workspaceId, reference, customer_id: customerId, conversation_id: input.conversationId,
       status: "awaiting_payment", subtotal_kobo: quote.subtotal_kobo, discount_kobo: quote.discount_kobo,
       total_kobo: quote.total_kobo, early_total_kobo: earlyTotal, currency: quote.currency, expires_at: expires, idempotency_key: idem,
-    }).select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").single();
+      promo_code: promo?.code ?? null,
+    }).select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code").single();
     if (oErr?.code === "23505" && oErr.message.includes("idempotency")) {
-      const again = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
+      const again = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
       return { order: again.data!, quote, reused: true };
     }
     if (oErr?.code === "23505") continue; // reference collision, try another
@@ -69,7 +86,7 @@ export async function createCheckout(input: CheckoutInput) {
     })));
     await db.from("financial_audit_logs").insert({
       workspace_id: input.workspaceId, action: "order.created", entity: "order", entity_id: order.reference,
-      details: { total_kobo: quote.total_kobo, discount_kobo: quote.discount_kobo, by: "agent" },
+      details: { total_kobo: quote.total_kobo, discount_kobo: quote.discount_kobo, promo: promo?.code ?? null, by: "agent" },
     });
     return { order, quote, reused: false };
   }

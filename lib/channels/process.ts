@@ -9,7 +9,7 @@ import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { flagIfAuthFailure } from "@/lib/channels/health";
 import { sendText } from "@/lib/channels/send";
 import {
-  eventKey, replyWindow, describeForAgent,
+  eventKey, replyWindow, describeForAgent, isOptOut,
   type ChannelEvent, type MessageEvent, type Provider, type ReferralEvent, type StatusEvent, type ReadEvent, type Referral,
 } from "@/lib/channels/events";
 
@@ -133,6 +133,13 @@ async function handleMessage(conn: Conn, ev: MessageEvent): Promise<"processed" 
   });
   if (mErr?.code === "23505") return "ignored"; // already stored: Meta retried the same message
   if (mErr) throw new Error(`message insert failed: ${mErr.message}`);
+
+  // STOP / unsubscribe: opt out of offers and broadcasts at once, whatever else is going on.
+  if (isOptOut(ev.text)) {
+    await db.from("conversations").update({ marketing_consent: false, opted_out_at: new Date().toISOString() }).eq("id", conv.id);
+    if (conn.status === "active") await deliver({ conn, conv, text: "Done. You won't get offers or broadcasts from us again. You can still message us any time.", role: "assistant" });
+    return "processed";
+  }
 
   // The owner decides whether the assistant answers here.
   if (conn.status !== "active") return "processed";       // channel paused or needs reconnecting: inbox only

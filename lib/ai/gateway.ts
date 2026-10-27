@@ -9,16 +9,27 @@ import { creditsFor, limitCodeFrom, limitMessage, reservationFor, usdCost, type 
 
 export type GatewayRequest = {
   workspaceId: string;
-  feature: "chat" | "receipt_check" | "launch_kit" | "agent_test";
+  feature: "chat" | "receipt_check" | "launch_kit" | "agent_test" | "followup" | "marketing_copy"
+    | "creative_research" | "creative_strategy" | "creative_calendar" | "creative_spec";
   agentId?: string | null;
   userId?: string | null;
   conversationId?: string | null;
   system: string;
   messages: Anthropic.MessageParam[];
-  tools?: Anthropic.Tool[];
+  tools?: Anthropic.ToolUnion[];
   maxTokens?: number;
   model?: string;
 };
+
+// Creative Director work (research, strategy, calendars) needs longer answers than a chat reply.
+const LONG_FEATURES = new Set(["creative_research", "creative_strategy", "creative_calendar", "creative_spec"]);
+const WEB_SEARCH_USD = 0.01; // Anthropic web search: $10 per 1,000 searches
+
+// USD cost of each completed call (tokens + server-side web searches), for spend caps and ledgers.
+const costs = new WeakMap<Anthropic.Message, number>();
+export const costOf = (m: Anthropic.Message) => costs.get(m) ?? 0;
+const totalUsd = (m: Anthropic.Message, rate: RateCard) =>
+  usdCost(m.usage, rate) + (m.usage.server_tool_use?.web_search_requests ?? 0) * WEB_SEARCH_USD;
 
 export class GatewayError extends Error {
   constructor(public code: string, public status: number, message: string) { super(message); }
@@ -101,6 +112,7 @@ async function freeCall(req: GatewayRequest, model: string, rate: RateCard, maxT
       model, max_tokens: maxTokens, system: req.system, messages: req.messages, ...(req.tools?.length ? { tools: req.tools } : {}),
     });
     await log(true, message.usage, requestId, null);
+    costs.set(message, totalUsd(message, rate));
     return message;
   } catch (err) {
     if (err instanceof GatewayError) { await log(false, null, null, err.code); throw err; }
@@ -115,7 +127,8 @@ async function freeCall(req: GatewayRequest, model: string, rate: RateCard, maxT
 
 export async function gatewayCall(req: GatewayRequest): Promise<Anthropic.Message> {
   const db = supabaseAdmin();
-  const { model, rate, maxOutput } = await loadPolicy(req.workspaceId, req.model);
+  const { model, rate, maxOutput: planMax } = await loadPolicy(req.workspaceId, req.model);
+  const maxOutput = LONG_FEATURES.has(req.feature) ? Math.max(planMax, 8000) : planMax;
   const maxTokens = Math.min(req.maxTokens ?? maxOutput, maxOutput);
   if (freeMode()) {
     // Free early access has no credit balance to stop runaway use, so cap AI calls per business per day.
@@ -156,6 +169,7 @@ export async function gatewayCall(req: GatewayRequest): Promise<Anthropic.Messag
       model, max_tokens: maxTokens, system: req.system, messages: req.messages, ...(req.tools?.length ? { tools: req.tools } : {}),
     });
     await settle(true, message.usage, requestId, null);
+    costs.set(message, totalUsd(message, rate));
     return message;
   } catch (err) {
     if (err instanceof GatewayError) { await settle(false, null, null, err.code); throw err; }
