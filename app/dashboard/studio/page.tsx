@@ -8,7 +8,7 @@ import * as A from "./actions";
 import StudioDemo from "./StudioDemo";
 import "./studio.css";
 
-export const metadata = { title: "Creative Director" };
+export const metadata = { title: "Content Creator" };
 export const maxDuration = 300;
 
 const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["usage", "Usage"]] as const;
@@ -77,7 +77,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
   return (
     <>
       <div className="page-head">
-        <div><h1>Creative Director</h1><p>Research before ideas, strategy before calendars, your approval before any money is spent.</p></div>
+        <div><h1>Content Creator</h1><p>Your Creative Director agent researches, plans your content and picks the best AI model for every photo and video. Nothing is spent without your yes.</p></div>
         <form className="cd-brand" method="get">
           <input type="hidden" name="tab" value={tab} />
           <select name="b" defaultValue={B} className="input">{(brands ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
@@ -362,7 +362,7 @@ async function Production({ B, ws, models, sp }: { B: string; ws: string; models
             return <tr key={i.id}><td><b>{i.planned_date}</b> {i.platform} · {i.format.replace(/_/g, " ")}<br /><small>“{(i.idea as Idea).hook}”</small></td><td><Chip s={i.status} /></td>
               <td>{spec ? <><small>{m?.name} · {spec.aspect_ratio}{spec.duration_seconds ? ` · ${spec.duration_seconds}s` : ""} · ×{spec.variations ?? 1}</small><details><summary><small>Prompt</small></summary><small className="pre">{spec.prompt}</small></details></> : <small className="muted">Not prepared</small>}
                 {models.length > 0 && ["approved", "failed", "generated"].includes(i.status) && <form action={A.prepareSpec} className="row"><input type="hidden" name="b" value={B} /><input type="hidden" name="id" value={i.id} />
-                  <select name="model" className="input" defaultValue={i.spec_model_id ?? ""}>{models.map((mm) => <option key={mm.id} value={mm.id}>{mm.name} ({mm.kind}, ${Number(mm.usd_per_unit)}/{mm.unit})</option>)}</select><button className="btn btn-line btn-sm">{spec ? "Re-prepare" : "Prepare"}</button></form>}</td>
+                  <select name="model" className="input" defaultValue={i.spec_model_id ?? "auto"}><option value="auto">Auto: best model for this post</option>{models.map((mm) => <option key={mm.id} value={mm.id}>{mm.name} ({mm.kind}, ${Number(mm.usd_per_unit)}/{mm.unit})</option>)}</select><button className="btn btn-line btn-sm">{spec ? "Re-prepare" : "Prepare"}</button></form>}</td>
               <td className="num">{m && spec ? `$${estimateCost(m, spec).toFixed(4)}` : "—"}</td></tr>;
           })}
         </tbody></table></div>

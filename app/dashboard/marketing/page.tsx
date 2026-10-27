@@ -119,7 +119,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   if (setupErr) return (
     <>
       <div className="page-head"><div><h1>Marketing</h1><p>Promotions, follow-ups, broadcasts and AI copy.</p></div></div>
-      <div className="panel"><h2>Almost ready</h2><p>Marketing is built and waiting for a one-time database setup. Once it's approved, promotions, follow-ups and broadcasts appear here.</p><a className="btn btn-line" href="/dashboard/studio">Preview the Creative Director →</a></div>
+      <div className="panel"><h2>Almost ready</h2><p>Marketing is built and waiting for a one-time database setup. Once it's approved, promotions, follow-ups and broadcasts appear here.</p><a className="btn btn-line" href="/dashboard/studio">Preview the Content Creator →</a></div>
     </>
   );
   const [{ data: promos }, settings, insights, { data: items }, { data: followups }, { data: broadcasts }] = await Promise.all([
@@ -150,7 +150,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <div className="page-head"><div><h1>Marketing</h1><p>Promotions your assistant can sell, follow-ups that win back sales, broadcasts to customers who said yes, and copy written from your real catalogue.</p></div>
-        <Link className="btn btn-line" href="/dashboard/studio">Creative Director →</Link></div>
+        <Link className="btn btn-line" href="/dashboard/studio">Content Creator →</Link></div>
       {sp.error && <div className="notice notice-bad" role="alert">{errors[sp.error] ?? "Something went wrong."}{sp.why ? `: ${sp.why}` : ""}</div>}
       {sp.saved && <div className="notice notice-ok" role="status">{saved[sp.saved] ?? "Saved."}</div>}
 

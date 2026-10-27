@@ -1,8 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
+import { TASKS, RECOMMENDED, type Task } from "@/lib/creative/router";
 import { demoBrand, demoAccounts, demoSources, demoReport, demoStrategy, demoItems, demoJobs, demoUsage, type DemoItem } from "./demo-data";
 
-const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["usage", "Usage"]] as const;
+const TABS = [["create", "Create"], ["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["usage", "Usage"]] as const;
 type Tab = (typeof TABS)[number][0];
 const LABEL: Record<string, string> = { draft: "Draft", awaiting_approval: "Awaiting approval", approved: "Approved", rejected: "Rejected", revision_requested: "Revision requested", generation_queued: "Generation queued", generating: "Generating", generated: "Ready for review", completed: "Completed", stored: "Stored", in_progress: "In progress", nsfw: "Blocked", running: "Running" };
 
@@ -11,7 +12,7 @@ const Src = ({ n }: { n: number[] }) => n.length ? <span className="srcs">{n.map
 const Conf = ({ c }: { c: string }) => <span className={`conf conf-${c}`}>{c} confidence</span>;
 
 export default function StudioDemo() {
-  const [tab, setTab] = useState<Tab>("calendar");
+  const [tab, setTab] = useState<Tab>("create");
   const [step, setStep] = useState(1);
   const [items, setItems] = useState<DemoItem[]>(demoItems);
   const [accounts, setAccounts] = useState(demoAccounts);
@@ -30,15 +31,19 @@ export default function StudioDemo() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Creative Director</h1><p>Research before ideas, strategy before calendars, your approval before any money is spent.</p></div>
+        <div><h1>Content Creator</h1><p>Make posts, photos and videos for your business. Your Creative Director agent researches, plans and picks the best AI model for each job, and nothing is spent without your yes.</p></div>
         <div className="cd-brand"><select className="input" defaultValue="mp"><option value="mp">{demoBrand.name}</option></select></div>
       </div>
-      <div className="demo-banner" role="note"><b>Preview with sample data.</b> This is how the Creative Director works. Nothing here is real research or a real charge: buttons update this preview only. It switches to your live workspace once the database setup is approved.</div>
+      <div className="demo-banner" role="note"><b>Preview with sample data.</b> This is how the Content Creator works. Nothing here is real research or a real charge: buttons update this preview only. It switches to your live workspace once the database setup is approved.</div>
       {toast && <div className="notice notice-ok" role="status">{toast}</div>}
 
       <nav className="cd-tabs" aria-label="Creative Director steps">
-        {TABS.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className="cd-tab">{l}</button>)}
+        {TABS.slice(0, 1).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className="cd-tab">{l}</button>)}
+        <span className="cd-group">Creative Director agent</span>
+        {TABS.slice(1).map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined} className="cd-tab">{l}</button>)}
       </nav>
+
+      {tab === "create" && <QuickCreate onPlan={() => setTab("brief")} flash={flash} />}
 
       {tab === "brief" && (
         <section className="panel">
@@ -226,5 +231,57 @@ export default function StudioDemo() {
         </section>
       )}
     </>
+  );
+}
+
+const MODEL_NAME: Record<string, string> = {
+  "marketing-studio/image": "Marketing Studio Image", "openai/gpt-image-2": "GPT Image 2", "openai/gpt-image-2/edit": "GPT Image 2 Edit",
+  "higgsfield-ai/soul/v2/standard": "Soul 2", "higgsfield-ai/cinema-studio/v2.5": "Cinema Studio 2.5", "higgsfield-ai/soul/cinematic": "Soul Cinema",
+  "kling-video/v4.0/image-to-video": "Kling 4", "bytedance/seedance-2.0/image-to-video": "Seedance 2", "minimax/h3/image-to-video": "MiniMax H3",
+  "bytedance/seedance-2.0/text-to-video": "Seedance 2", "kling-video/v4.0/text-to-video": "Kling 4", "alibaba/wan-3.0-prime/text-to-video": "Wan 3.0",
+};
+
+function QuickCreate({ onPlan, flash }: { onPlan: () => void; flash: (t: string) => void }) {
+  const [task, setTask] = useState<Task>("product_photo");
+  const [brief, setBrief] = useState("Party jollof tray, serves 40, December offer ₦76,500");
+  const [photo, setPhoto] = useState(true);
+  const [step, setStep] = useState<"form" | "director" | "done">("form");
+  const t = TASKS[task];
+  const pick = RECOMMENDED[task][0];
+  return (
+    <section className="cc-wrap">
+      <div className="panel">
+        <h2>What do you want to make?</h2>
+        <div className="cc-tasks" role="radiogroup" aria-label="Type of content">
+          {(Object.keys(TASKS) as Task[]).map((k) => (
+            <button key={k} type="button" role="radio" aria-checked={task === k} className={`cc-task${task === k ? " on" : ""}`} onClick={() => { setTask(k); setStep("form"); }}>
+              <b>{TASKS[k].label}</b><small>{TASKS[k].kind === "video" ? "Video" : "Image"}</small>
+            </button>
+          ))}
+        </div>
+        <label className="field"><span>Describe it in a line</span><textarea rows={2} className="input" value={brief} onChange={(e) => setBrief(e.target.value)} /></label>
+        <label className="row" style={{ fontSize: 14 }}><input type="checkbox" checked={photo} onChange={(e) => setPhoto(e.target.checked)} /> Use my product photo (jollof-trays.jpg){t.needsReference && !photo && <span className="hyp"> · this one works best with your photo</span>}</label>
+        <div className="row wrap" style={{ marginTop: 10 }}>
+          <button className="btn btn-ink" type="button" onClick={() => setStep("director")}>Ask the Creative Director</button>
+          <button className="btn btn-line" type="button" onClick={onPlan}>Plan a full month instead →</button>
+        </div>
+      </div>
+      {step !== "form" && (
+        <div className="panel cc-director" aria-live="polite">
+          <h2>Creative Director&apos;s plan</h2>
+          <dl className="idea">
+            <dt>Job</dt><dd>{t.label}: {t.why}</dd>
+            <dt>Best model</dt><dd><b>{MODEL_NAME[pick] ?? pick}</b> <small className="muted">(picked automatically; backups: {RECOMMENDED[task].slice(1).map((p) => MODEL_NAME[p] ?? p).join(", ") || "none"})</small></dd>
+            <dt>Prompt</dt><dd className="pre">{`${brief}. ${task === "poster" ? "Bold headline and price, clean layout, brand greens and ember orange." : "Warm firelight, real Lagos kitchen, handheld close-up, appetising steam."}${photo && t.needsReference ? " Keep the exact tray from the reference photo." : ""}`}</dd>
+            <dt>Format</dt><dd>{t.kind === "video" ? "9:16 · 6 seconds · Reels, TikTok, Status" : task === "poster" ? "4:5 · Instagram feed" : "1:1 and 4:5"}</dd>
+            <dt>Caption</dt><dd>Serves 40. Won&apos;t last 40 minutes. 🔥 Book 3 weeks ahead and save 10%. DM DECEMBER.</dd>
+            <dt>Estimate</dt><dd>{t.kind === "video" ? "about $0.30" : "about $0.01"} · held from your budget, released if it fails</dd>
+          </dl>
+          {step === "director" ? (
+            <div className="row wrap"><button className="btn btn-ink" type="button" onClick={() => { setStep("done"); flash("Preview only: in your live workspace this would generate now."); }}>Approve and generate</button><button className="btn btn-line" type="button" onClick={() => setStep("form")}>Change it</button></div>
+          ) : <figure className="cc-result"><img src={`${"https://xmjgpprmddptoldhrswj.supabase.co/storage/v1/object/public/brand-assets/site/hero"}/jollof-trays.jpg`} alt="Sample result: party jollof tray" /><figcaption>Sample result (preview). Download, edit again, or add to your calendar.</figcaption></figure>}
+        </div>
+      )}
+    </section>
   );
 }

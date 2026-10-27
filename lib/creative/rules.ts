@@ -1,6 +1,6 @@
 // Pure rules: cost estimates, quota error messages, and which status changes are allowed.
 
-export type ModelRow = { id: string; endpoint: string; name: string; kind: "image" | "video"; unit: "image" | "second"; usd_per_unit: number; max_seconds: number | null; allowed_params: string[]; enabled: boolean };
+export type ModelRow = { id: string; endpoint: string; name: string; kind: "image" | "video"; unit: "image" | "second"; usd_per_unit: number; max_seconds: number | null; allowed_params: string[]; enabled: boolean; tasks?: string[] | null; quality_rank?: number | null; image_param?: string | null };
 
 /** Price of one generation at the admin-configured rate. Video is priced per second. */
 export function estimateCost(m: Pick<ModelRow, "unit" | "usd_per_unit" | "max_seconds">, spec: { duration_seconds?: number; variations?: number }): number {
@@ -14,13 +14,16 @@ export function estimateCost(m: Pick<ModelRow, "unit" | "usd_per_unit" | "max_se
 const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 
 /** Only the keys the admin allowed for this model are sent to the provider. */
-export function providerInput(m: Pick<ModelRow, "allowed_params" | "max_seconds">, spec: Record<string, unknown>): Record<string, unknown> {
+export function providerInput(m: Pick<ModelRow, "allowed_params" | "max_seconds"> & { image_param?: string | null }, spec: Record<string, unknown>, referenceUrls: string[] = []): Record<string, unknown> {
   const map: Record<string, unknown> = {
     prompt: spec.prompt, negative_prompt: spec.negative || undefined, aspect_ratio: spec.aspect_ratio,
     duration: spec.duration_seconds ? Math.min(Number(spec.duration_seconds), m.max_seconds ?? 60) : undefined,
     resolution: spec.resolution || undefined, num_images: spec.variations,
   };
-  return Object.fromEntries(Object.entries(map).filter(([k, v]) => m.allowed_params.includes(k) && v !== undefined && v !== ""));
+  const out = Object.fromEntries(Object.entries(map).filter(([k, v]) => m.allowed_params.includes(k) && v !== undefined && v !== ""));
+  // Owner photos go to the model's image input (e.g. image_url or input_images) so it edits/animates the real product.
+  if (m.image_param && referenceUrls.length) out[m.image_param] = m.image_param.endsWith("s") ? referenceUrls : referenceUrls[0];
+  return out;
 }
 
 const SCOPE: Record<string, string> = { platform: "the platform's", plan: "your plan's", org: "your business's", brand: "this brand's", user: "your personal" };

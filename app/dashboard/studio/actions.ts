@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { BrandProfile } from "@/lib/creative/schemas";
 import { canMoveItem } from "@/lib/creative/rules";
 import { QuotaError } from "@/lib/creative/budget";
+import { taskFor, chooseModel, type RoutableModel } from "@/lib/creative/router";
 import { runResearch, suggestAccounts, draftStrategy, draftCalendar, regenerateItem, draftProductionSpec } from "@/lib/creative/director";
 import { authorizeBatch, submitJob } from "@/lib/creative/jobs";
 import { GatewayError } from "@/lib/ai/gateway";
@@ -217,9 +218,22 @@ export async function approveCalendar(formData: FormData) {
 export async function prepareSpec(formData: FormData) {
   const { brand, d } = await own(formData);
   const id = String(formData.get("id") ?? "");
-  const modelId = String(formData.get("model") ?? "");
+  const modelId = String(formData.get("model") ?? "auto");
   const db = supabaseAdmin();
-  const { data: m } = await db.from("provider_models").select("id,name,kind,max_seconds,enabled").eq("id", modelId).maybeSingle();
+  let m: { id: string; name: string; kind: "image" | "video"; max_seconds: number | null; enabled: boolean } | null = null;
+  if (modelId === "auto") {
+    // The Creative Director picks the best enabled model for this item's task.
+    const [{ data: item }, { data: models }, { data: b }] = await Promise.all([
+      db.from("content_items").select("format,idea").eq("id", id).eq("brand_id", brand!.id).maybeSingle(),
+      db.from("provider_models").select("*").eq("enabled", true),
+      db.from("creative_brands").select("asset_paths").eq("id", brand!.id).single(),
+    ]);
+    const idea = JSON.stringify(item?.idea ?? {}).toLowerCase();
+    const task = taskFor({ format: item?.format ?? "static_image", hasReference: (b?.asset_paths ?? []).some((p: string) => /\.(png|jpe?g|webp)$/i.test(p)), needsText: /₦|price|% off|offer|discount/.test(idea) });
+    m = (chooseModel(task, (models ?? []) as RoutableModel[])?.model as unknown as typeof m) ?? null;
+  } else {
+    m = (await db.from("provider_models").select("id,name,kind,max_seconds,enabled").eq("id", modelId).maybeSingle()).data;
+  }
   if (!m?.enabled) go(brand?.id ?? null, "production", "error=model");
   try {
     const spec = await draftProductionSpec(d, id, m!);

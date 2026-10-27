@@ -133,3 +133,18 @@ test("Higgsfield webhooks: Standard Webhooks signatures verified, tampering and 
   assert.equal(verifyHfWebhook({ secret, id: "msg_1", timestamp: String(Number(ts) - 600), signature: `v1,${sig}`, body }), false);
   assert.equal(verifyHfWebhook({ secret: "", id: "msg_1", timestamp: ts, signature: `v1,${sig}`, body }), false);
 });
+
+import { chooseModel, taskFor } from "../lib/creative/router.ts";
+test("router: picks best enabled model for the task, needs image input for edits", () => {
+  const ms = [
+    { id: "a", endpoint: "openai/gpt-image-2/edit", kind: "image" as const, enabled: true, tasks: ["photo_edit", "product_photo"], image_param: "image_url" },
+    { id: "b", endpoint: "marketing-studio/image", kind: "image" as const, enabled: true, tasks: ["product_photo"], image_param: "image_url" },
+    { id: "c", endpoint: "openai/gpt-image-2", kind: "image" as const, enabled: true, tasks: ["poster"], image_param: null },
+    { id: "v", endpoint: "kling-video/v4.0/image-to-video", kind: "video" as const, enabled: false, tasks: ["animate_photo"], image_param: "image_url" },
+  ];
+  assert.equal(chooseModel("product_photo", ms)?.model.id, "b");
+  assert.equal(chooseModel("poster", ms)?.model.id, "c");
+  assert.equal(chooseModel("animate_photo", ms), null);
+  assert.equal(taskFor({ format: "reel", hasReference: true }), "animate_photo");
+  assert.equal(taskFor({ format: "static_image", hasReference: false, needsText: true }), "poster");
+});

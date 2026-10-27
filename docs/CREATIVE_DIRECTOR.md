@@ -93,3 +93,11 @@ Optional model selection: `CREATIVE_STRATEGY_MODEL` (strategy and research) and 
 - **Media prices:** these are the admin-entered list prices. Reconcile them against Higgsfield's usage page monthly.
 - **Long runs:** research runs inside the request that started it (up to 300 s). A run cut off by a timeout shows as failed and can be retried.
 - **Not live-tested:** nothing in this feature has been tested live yet. The Anthropic account is out of credit, there are no Higgsfield credentials, and migrations 0015–0017 are waiting for Supabase approval.
+
+## Content Creator + model routing (0018)
+The feature is now "Content Creator" (quick Create tab) with the Creative Director as its agent (brief → research → strategy → calendar → production).
+`lib/creative/router.ts` maps each task (product photo, lifestyle, poster, photo edit, animate photo, video ad, cinematic) to the best
+models, best first. Production defaults to "Auto": it picks the highest-ranked ENABLED model tagged for the task. Owner photos are sent
+as signed URLs in the model's `image_param` so edits/animations keep the real product.
+Migration 0018 seeds the recommended catalogue DISABLED with placeholder prices. Before enabling one in /admin/creative, confirm its
+path, parameters and real price on Higgsfield.

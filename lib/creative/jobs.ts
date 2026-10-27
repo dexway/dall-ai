@@ -66,9 +66,14 @@ export async function authorizeBatch(a: { workspaceId: string; brandId: string; 
     try {
       await reserve({ workspaceId: a.workspaceId, brandId: a.brandId, userId: a.userId, resource: l.model.kind === "video" ? "video_generations" : "image_generations", amount: l.spec.variations, jobRef: key });
     } catch (e) { await settle(resMoney, 0, "higgsfield", l.model.endpoint); throw e; }
+    let refs: string[] = [];
+    if (l.model.image_param && l.spec.reference_asset_paths.length) {
+      const { data: signed } = await db.storage.from("creative-assets").createSignedUrls(l.spec.reference_asset_paths, 60 * 60 * 24);
+      refs = (signed ?? []).map((x) => x.signedUrl).filter(Boolean) as string[];
+    }
     const { data: job, error } = await db.from("generation_jobs").insert({
       workspace_id: a.workspaceId, brand_id: a.brandId, item_id: l.itemId, model_id: l.model.id, spec: l.spec,
-      input: providerInput(l.model, l.spec), idempotency_key: key, est_cost_usd: l.estimate, reservation_id: resMoney, authorized_by: a.userId,
+      input: providerInput(l.model, l.spec, refs), idempotency_key: key, est_cost_usd: l.estimate, reservation_id: resMoney, authorized_by: a.userId,
     }).select("id").single();
     if (error) { await settle(resMoney, 0, "higgsfield", l.model.endpoint); throw new Error(error.message); }
     await db.from("content_items").update({ status: "generation_queued", updated_at: new Date().toISOString() }).eq("id", l.itemId);
