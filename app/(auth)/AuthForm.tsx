@@ -32,7 +32,9 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       setBusy(false);
       if (error) return setError(error.message === "Invalid login credentials" ? "That email and password don't match. Check them and try again." : error.message);
-      router.replace(params.get("next") || "/dashboard");
+      // Only local paths: "?next=https://evil.example" or "//evil.example" would send a fresh login off-site.
+      const next = params.get("next") ?? "";
+      router.replace(next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/dashboard");
       router.refresh();
     }
   }

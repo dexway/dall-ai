@@ -52,7 +52,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
             </label>
             <button className="btn btn-ink">Continue</button>
           </form>
-          <p className="muted" style={{ fontSize: 14 }}>You start on a free trial with 150 AI credits.</p>
+          <p className="muted" style={{ fontSize: 14 }}>Free during early access.</p>
         </div>
       </main>
     </div>

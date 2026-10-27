@@ -11,10 +11,10 @@
   --mint: #DCE6D8;       /* Soft Mint: quiet support */
 
   --ink-70: rgba(20, 35, 31, .7);
-  --ink-50: rgba(20, 35, 31, .5);
+  --ink-50: rgba(20, 35, 31, .66);
   --ink-12: rgba(20, 35, 31, .12);
-  --mint-70: rgba(220, 230, 216, .72);
-  --mint-45: rgba(220, 230, 216, .45);
+  --mint-70: rgba(220, 230, 216, .84);
+  --mint-45: rgba(220, 230, 216, .68);
   --glass: rgba(220, 230, 216, .07);
   --glass-strong: rgba(220, 230, 216, .12);
   --glass-line: rgba(220, 230, 216, .16);

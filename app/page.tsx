@@ -15,8 +15,8 @@ const USES = [
 ];
 
 const NODES = [
-  { k: "Trigger", t: "New WhatsApp message", d: "Or a missed call, a USSD dial, a form, a schedule." },
-  { k: "Send message", t: "Greeting + menu", d: "Buttons and lists on WhatsApp, numbered options on USSD." },
+  { k: "Trigger", t: "New WhatsApp message", d: "Or an Instagram DM, a Messenger chat, a tap on your ad." },
+  { k: "Send message", t: "Greeting + menu", d: "Buttons and lists on WhatsApp, quick replies on Messenger." },
   { k: "Condition", t: "Order or question?", d: "Branch on what the customer said or picked." },
   { k: "LLM agent", t: "Amaka handles it", d: "Answers, recommends, quotes from your real catalogue.", llm: true },
   { k: "API call", t: "Check stock / tracking", d: "Reach your inventory, CRM or delivery system." },
@@ -46,7 +46,7 @@ export default function Landing() {
               <span className="tag">● Built in Lagos for Nigerian businesses</span>
               <h1>The AI staff that answers, sells <em>and checks the money.</em></h1>
               <p className="hero-sub">
-                Give your business an assistant with its own name and face. It replies on WhatsApp, SMS, USSD, your website and phone calls,
+                Give your business an assistant with its own name and face. It replies on WhatsApp, Instagram, Messenger and your website (calls, SMS and USSD are coming soon),
                 quotes from your real prices, sends your bank details with a payment timer, and flags fake transfer receipts before you ship.
               </p>
               <div className="hero-ctas">
@@ -121,23 +121,23 @@ export default function Landing() {
             </div>
             <div className="bento">
               <article className="tile glass t-wa">
-                <h3>WhatsApp</h3>
+                <h3>WhatsApp, Instagram &amp; Messenger</h3>
                 <p>Buttons, product lists, voice notes and receipts, on your business number.</p>
                 <div className="sms"><div>Do you deliver to Lekki Phase 1?</div><div>Yes! ₦2,500 delivery, same day if you order before 2pm.</div></div>
               </article>
               <article className="tile glass t-call">
-                <h3>Calls in and out</h3>
+                <h3>Calls in and out <span className="soon">Coming soon</span></h3>
                 <p>Picks up when you can't, and calls customers back to confirm orders and remind them about bookings.</p>
                 <div className="call-row"><span>↙ Inbound</span><span>↗ Outbound reminders</span><span>Nigerian voices</span></div>
                 <div className="wave" aria-hidden>{Array.from({ length: 28 }, (_, i) => <i key={i} style={{ height: `${20 + ((i * 37) % 80)}%`, animationDelay: `${(i % 7) * 0.12}s` }} />)}</div>
               </article>
               <article className="tile glass t-ussd">
-                <h3>USSD</h3>
+                <h3>USSD <span className="soon">Coming soon</span></h3>
                 <p>For customers without data.</p>
                 <div className="ussd">Dial <b>*347*88#</b><br />1. Place order<br />2. Track order<br />3. Talk to Amaka</div>
               </article>
               <article className="tile glass t-sms">
-                <h3>Two-way SMS</h3>
+                <h3>Two-way SMS <span className="soon">Coming soon</span></h3>
                 <p>Confirmations and replies by text.</p>
                 <div className="sms"><div>MAM-7KQ2 paid ✓</div><div>Thank you! Delivery 4pm.</div></div>
               </article>
@@ -169,11 +169,11 @@ export default function Landing() {
               <div className="receipt" aria-label="Example receipt check">
                 <span className="eyebrow" style={{ color: "var(--ink)" }}>Receipt check · MAM-7KQ2X9PD</span>
                 <dl>
-                  <dt>Amount</dt><dd>₦140,000</dd><span className="chip chip-ok">matches</span>
-                  <dt>To account</dt><dd>•••• 4417</dd><span className="chip chip-ok">yours</span>
-                  <dt>Name</dt><dd>MAMA PUT KITCHEN</dd><span className="chip chip-ok">matches</span>
-                  <dt>Date</dt><dd>Sat 07:58</dd><span className="chip chip-ok">after order</span>
-                  <dt>Status text</dt><dd>“Successful”</dd><span className="chip chip-warn">needs your OK</span>
+                  <dt>Amount</dt><dd>₦140,000 <span className="chip chip-ok">matches</span></dd>
+                  <dt>To account</dt><dd>•••• 4417 <span className="chip chip-ok">yours</span></dd>
+                  <dt>Name</dt><dd>MAMA PUT KITCHEN <span className="chip chip-ok">matches</span></dd>
+                  <dt>Date</dt><dd>Sat 07:58 <span className="chip chip-ok">after order</span></dd>
+                  <dt>Status text</dt><dd>“Successful” <span className="chip chip-warn">needs your OK</span></dd>
                 </dl>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><span className="btn btn-ink btn-sm">Approve payment</span><span className="btn btn-line btn-sm">Reject with reason</span></div>
               </div>
@@ -261,8 +261,8 @@ export default function Landing() {
               <table>
                 <thead><tr><th>What you need</th><th>{BRAND.name}</th><th>Typical chatbot builder</th></tr></thead>
                 <tbody>
-                  <tr><td>WhatsApp, SMS, USSD, web chat</td><td>✓ Included</td><td>✓ Usually</td></tr>
-                  <tr><td>Phone calls in and out</td><td>✓ With Nigerian voices</td><td>Often extra or missing</td></tr>
+                  <tr><td>WhatsApp, Instagram, Messenger, web chat</td><td>✓ Included</td><td>✓ Usually</td></tr>
+                  <tr><td>Phone calls, SMS and USSD</td><td>Coming soon</td><td>Often extra or missing</td></tr>
                   <tr><td>Quotes from your real catalogue</td><td>✓ Prices computed on our server</td><td>Depends on your setup</td></tr>
                   <tr><td>Bank transfer in chat with a payment timer</td><td>✓ Built in</td><td>✗</td></tr>
                   <tr><td>Transfer receipt checking</td><td>✓ Read, compared, flagged</td><td>✗</td></tr>
@@ -279,21 +279,15 @@ export default function Landing() {
           <div className="wrap">
             <div className="sec-head">
               <span className="eyebrow">Pricing in naira</span>
-              <h2>Start free. <em>Pay as you grow.</em></h2>
-              <p>No AI accounts or API keys to set up. You get credits; your assistant uses them when it replies.</p>
+              <h2>Free during <em>early access.</em></h2>
+              <p>No AI accounts or API keys to set up. Every live feature is free while we&apos;re in early access; paid plans in naira come later, and you&apos;ll hear about them before anything changes.</p>
             </div>
             <div className="plans">
-              <div className="plan glass"><h3>Free trial</h3><div className="price">₦0 <small>/ 14 days</small></div>
-                <ul><li>150 credits</li><li>Web chat assistant</li><li>Catalogue, checkout and receipt checks</li></ul>
-                <Link href="/signup" className="btn btn-ghost">Start free</Link></div>
-              <div className="plan glass feat"><h3>Starter</h3><div className="price">₦25,000 <small>/ month</small></div>
-                <ul><li>700 credits every month</li><li>WhatsApp + web chat</li><li>Paystack checkout</li><li>Launch kit</li></ul>
-                <Link href="/signup" className="btn btn-lime">Choose Starter</Link></div>
-              <div className="plan glass"><h3>Growth</h3><div className="price">₦75,000 <small>/ month</small></div>
-                <ul><li>2,500 credits every month</li><li>All channels incl. USSD and calls</li><li>Team members and approvals</li></ul>
-                <Link href="/signup" className="btn btn-ghost">Choose Growth</Link></div>
+              <div className="plan glass feat"><h3>Early access</h3><div className="price">₦0 <small>/ month</small></div>
+                <ul><li>AI assistant on WhatsApp, Instagram, Messenger and web chat</li><li>Catalogue, checkout, bank transfer timer and receipt checks</li><li>Inbox, leads, promotions and click-to-chat ads</li><li>Fair-use daily limit per business</li></ul>
+                <Link href="/signup" className="btn btn-lime">Create your free workspace</Link></div>
             </div>
-            <p className="credit-note">A typical customer message uses 1 to 3 credits (more when the assistant creates an order or reads a receipt). You see every credit spent in your dashboard, get a warning at 80%, and can top up anytime from ₦12,000.</p>
+            <p className="credit-note">Ads you run are paid to Meta from your own ad account. Paystack card payments use your own Paystack account and fees.</p>
           </div>
         </section>
 

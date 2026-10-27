@@ -18,11 +18,12 @@ export default async function ChatPage({ params }: { params: Promise<{ slug: str
   const { data: a } = await db.from("agents").select("name,role_title,greeting,avatar_path,accent_color").eq("workspace_id", ws.id).eq("active", true).order("created_at").limit(1).maybeSingle();
   if (!a) notFound();
   return (
-    <div className="pub">
+    <main className="pub">
+      <h1 style={{ position: "absolute", left: -9999 }}>Chat with {ws.name}</h1>
       <div className="pub-card">
         <ChatBox slug={slug} agent={{ name: a.name, role: a.role_title, greeting: a.greeting, avatar: publicAssetUrl(a.avatar_path), color: a.accent_color }} business={ws.name} />
         <p className="powered">AI assistant · replies may be checked by {ws.name} · powered by {BRAND.name}</p>
       </div>
-    </div>
+    </main>
   );
 }

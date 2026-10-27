@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { retryStoredEvent } from "@/lib/channels/process";
 import { syncWorkspaceAds } from "@/lib/ads-sync";
@@ -9,7 +10,9 @@ export const maxDuration = 60;
 // campaign status and insights for every business with campaigns. Protected by CRON_SECRET.
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return new Response("unauthorized", { status: 401 });
+  const given = req.headers.get("authorization") ?? "";
+  const want = `Bearer ${secret ?? ""}`;
+  if (!secret || given.length !== want.length || !timingSafeEqual(Buffer.from(given), Buffer.from(want))) return new Response("unauthorized", { status: 401 });
   const db = supabaseAdmin();
   const started = Date.now();
   const since = new Date(Date.now() - 3 * 86400_000).toISOString();

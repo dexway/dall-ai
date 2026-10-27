@@ -4,7 +4,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: `${BRAND.name} — ${BRAND.tagline}`, template: `%s · ${BRAND.name}` },
-  description: "AI assistants that answer, sell and confirm payments for Nigerian businesses on WhatsApp, SMS, USSD, web chat and phone calls.",
+  description: "AI assistants that answer, sell and confirm payments for Nigerian businesses on WhatsApp, Instagram, Messenger and web chat.",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://dall-ai.vercel.app"),
+  alternates: { canonical: "/" },
+  openGraph: { type: "website", siteName: BRAND.name, images: [{ url: "https://xmjgpprmddptoldhrswj.supabase.co/storage/v1/object/public/brand-assets/site/hero/owner-kitchen.jpg", width: 1200, height: 630 }] },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#14231F" };
 

@@ -70,10 +70,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   } catch (e) {
     if (e instanceof GatewayError) {
       // Customers see a polite message; the business owner sees the real reason in the dashboard.
-      const customerText = e.status === 402 || e.status === 403
-        ? "Sorry, this assistant is resting right now. Please contact the business directly."
-        : e.message;
-      return NextResponse.json({ error: customerText, code: e.code, conversationId: conversation.id, visitorToken: conversation.visitor_token }, { status: e.status });
+      if (e.status !== 402 && e.status !== 403) {
+        // AI hiccup: don't leave the customer at a dead end. Flag the chat for the team and say so.
+        await db.from("conversations").update({ unread: true, handoff_reason: "The assistant couldn't reply (AI service error). Please reply by hand." }).eq("id", conversation.id);
+        const reply = `Thanks for your message! ${ws.name}'s team will reply here shortly.`;
+        await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "assistant", content: { text: reply }, delivery_status: "delivered" });
+        return NextResponse.json({ reply, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
+      }
+      return NextResponse.json({ error: "Sorry, this assistant is resting right now. Please contact the business directly.", code: e.code, conversationId: conversation.id, visitorToken: conversation.visitor_token }, { status: e.status });
     }
     console.error("[chat] unexpected", (e as Error).message);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });

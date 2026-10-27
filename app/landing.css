@@ -251,3 +251,4 @@ body:has(.lp)::before { content: ""; position: fixed; inset: 0 0 auto; height: e
 .final p { font-size: 17px; max-width: 34em; }
 .foot { padding-block: 40px 56px; color: var(--mint-45); font-size: 14px; }
 .foot .wrap { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; }
+.soon { font-family: var(--f-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: rgba(200,238,114,.16); color: #C8EE72; vertical-align: middle; margin-left: 6px; }

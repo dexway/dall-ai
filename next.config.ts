@@ -13,6 +13,19 @@ const config: NextConfig = {
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(self)" },
+        // Report-only first: logs what a strict policy would block without breaking anything; enforce once clean.
+        { key: "Content-Security-Policy-Report-Only", value: [
+          "default-src 'self'",
+          "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://js.paystack.co",
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+          "font-src 'self' https://fonts.gstatic.com",
+          `img-src 'self' data: blob: https://${supabaseHost} https://*.fbcdn.net https://*.cdninstagram.com`,
+          `media-src 'self' blob: https://${supabaseHost}`,
+          `connect-src 'self' https://${supabaseHost} wss://${supabaseHost} https://graph.facebook.com https://api.paystack.co`,
+          "frame-src https://www.facebook.com https://checkout.paystack.com",
+          "frame-ancestors 'self'", "base-uri 'self'", "form-action 'self' https://www.facebook.com",
+        ].join("; ") },
       ],
     }];
   },
