@@ -89,3 +89,4 @@ details.add > summary::-webkit-details-marker { display: none; }
 .sr { position: absolute; left: -9999px; }
 @media (max-width: 1100px) { .inbox { grid-template-columns: minmax(230px, 290px) minmax(0, 1fr); } .inbox-side { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .inbox-side .panel { margin-top: 0 !important; } }
 @media (max-width: 760px) { .inbox { grid-template-columns: 1fr; } .inbox-list { max-height: 300px; } .inbox-side { grid-template-columns: 1fr; } .bubble { max-width: 92%; } .thread-head { flex-direction: column; } }
+@media (max-width: 760px) { .ad-builder { grid-template-columns: 1fr !important; } }

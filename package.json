@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/sql.test.mjs tests/isolation.test.mjs"
+    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/ads.test.ts tests/sql.test.mjs tests/isolation.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

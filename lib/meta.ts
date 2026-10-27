@@ -136,6 +136,7 @@ export type AdTargeting = { countries?: string[]; ageMin?: number; ageMax?: numb
 export async function launchClickToChatAd(args: {
   adAccountId: string; token: string; pageId: string; destination: AdDestination;
   name: string; headline: string; message: string; dailyBudgetMinor: number; imageUrl?: string | null; targeting?: AdTargeting;
+  endTime?: string | null;
 }): Promise<{ campaignId: string; adsetId: string; creativeId: string; adId: string }> {
   const d = DEST[args.destination];
   const t = args.targeting ?? {};
@@ -174,7 +175,7 @@ export async function launchClickToChatAd(args: {
       name: args.name, campaign_id: campaignId, daily_budget: args.dailyBudgetMinor,
       billing_event: "IMPRESSIONS", optimization_goal: "CONVERSATIONS", bid_strategy: "LOWEST_COST_WITHOUT_CAP",
       destination_type: d.destination_type, promoted_object: { page_id: args.pageId },
-      targeting, status: "PAUSED",
+      targeting, status: "PAUSED", ...(args.endTime ? { end_time: args.endTime } : {}),
     });
 
     // 4. Creative: photo, text and the chat button.
