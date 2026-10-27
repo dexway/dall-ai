@@ -115,6 +115,13 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   const sp = await searchParams;
   const db = supabaseAdmin();
   const ws = ctx.workspace.id;
+  const { error: setupErr } = await db.from("promotions").select("id").limit(1);
+  if (setupErr) return (
+    <>
+      <div className="page-head"><div><h1>Marketing</h1><p>Promotions, follow-ups, broadcasts and AI copy.</p></div></div>
+      <div className="panel"><h2>Almost ready</h2><p>Marketing is built and waiting for a one-time database setup. Once it's approved, promotions, follow-ups and broadcasts appear here.</p><a className="btn btn-line" href="/dashboard/studio">Preview the Creative Director →</a></div>
+    </>
+  );
   const [{ data: promos }, settings, insights, { data: items }, { data: followups }, { data: broadcasts }] = await Promise.all([
     db.from("promotions").select("*").eq("workspace_id", ws).order("created_at", { ascending: false }),
     marketingSettings(ws),

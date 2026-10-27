@@ -5,6 +5,7 @@ import { BrandProfile, missingBrief, ResearchReport, Strategy, type Idea } from 
 import { estimateCost, type ModelRow } from "@/lib/creative/rules";
 import { generationConfigured } from "@/lib/creative/jobs";
 import * as A from "./actions";
+import StudioDemo from "./StudioDemo";
 import "./studio.css";
 
 export const metadata = { title: "Creative Director" };
@@ -30,7 +31,9 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
   const db = supabaseAdmin();
   const ws = ctx.workspace.id;
   const tab = (TABS.find(([k]) => k === sp.tab)?.[0]) ?? "brief";
-  const { data: brands } = await db.from("creative_brands").select("id,name,onboarding_step").eq("workspace_id", ws).order("created_at");
+  const { data: brands, error: setupErr } = await db.from("creative_brands").select("id,name,onboarding_step").eq("workspace_id", ws).order("created_at");
+  // Until the Creative Director tables exist (migrations awaiting approval), or when ?demo=1, show the preview.
+  if (setupErr || sp.demo === "1") return <StudioDemo />;
   const brand = (brands ?? []).find((b) => b.id === sp.b) ?? (brands ?? [])[0];
 
   if (!brand) {

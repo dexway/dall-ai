@@ -39,9 +39,9 @@ export async function createCheckout(input: CheckoutInput) {
   const basket = JSON.stringify([...quote.lines].sort((a, b) => a.item_id.localeCompare(b.item_id)).map((l) => [l.item_id, l.quantity]));
   const idem = createHash("sha256").update(`${input.conversationId ?? "direct"}|${basket}|${quote.discount_kobo}|${promo?.code ?? ""}`).digest("hex").slice(0, 40);
 
-  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code")
+  const existing = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at")
     .eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).maybeSingle();
-  if (existing.data) return { order: existing.data, quote, reused: true };
+  if (existing.data) return { order: existing.data, quote, reused: true, promoCode: promo?.code ?? null };
 
   let customerId: string | null = null;
   if (input.customer.phone || input.customer.email || input.customer.name) {
@@ -72,11 +72,11 @@ export async function createCheckout(input: CheckoutInput) {
       workspace_id: input.workspaceId, reference, customer_id: customerId, conversation_id: input.conversationId,
       status: "awaiting_payment", subtotal_kobo: quote.subtotal_kobo, discount_kobo: quote.discount_kobo,
       total_kobo: quote.total_kobo, early_total_kobo: earlyTotal, currency: quote.currency, expires_at: expires, idempotency_key: idem,
-      promo_code: promo?.code ?? null,
-    }).select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code").single();
+      ...(promo ? { promo_code: promo.code } : {}), // column only needed when a promotion is used
+    }).select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").single();
     if (oErr?.code === "23505" && oErr.message.includes("idempotency")) {
-      const again = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at,promo_code").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
-      return { order: again.data!, quote, reused: true };
+      const again = await db.from("orders").select("id,reference,public_token,total_kobo,early_total_kobo,status,expires_at").eq("workspace_id", input.workspaceId).eq("idempotency_key", idem).single();
+      return { order: again.data!, quote, reused: true, promoCode: promo?.code ?? null };
     }
     if (oErr?.code === "23505") continue; // reference collision, try another
     if (oErr) throw oErr;
@@ -88,7 +88,7 @@ export async function createCheckout(input: CheckoutInput) {
       workspace_id: input.workspaceId, action: "order.created", entity: "order", entity_id: order.reference,
       details: { total_kobo: quote.total_kobo, discount_kobo: quote.discount_kobo, promo: promo?.code ?? null, by: "agent" },
     });
-    return { order, quote, reused: false };
+    return { order, quote, reused: false, promoCode: promo?.code ?? null };
   }
   throw new QuoteError("Could not create an order reference, please retry");
 }

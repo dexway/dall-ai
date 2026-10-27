@@ -132,7 +132,7 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
       };
     }
     if (name === "create_checkout") {
-      const { order, quote } = await createCheckout({
+      const { order, quote, promoCode } = await createCheckout({
         workspaceId: ws, workspaceName: ctx.businessName, conversationId: ctx.conversationId,
         maxDiscountPct: Number(ctx.agent.max_discount_pct),
         items: (input.items as { item_id: string; quantity: number }[]) ?? [],
@@ -146,7 +146,7 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         lines: quote.lines.map((l) => `${l.quantity} × ${l.name} @ ${formatNaira(l.unit_price_kobo)} = ${formatNaira(l.line_total_kobo)}`),
         discount: quote.discount_kobo ? formatNaira(quote.discount_kobo) : undefined,
         total: formatNaira(quote.total_kobo),
-        ...(order.promo_code ? { promotion_applied: order.promo_code } : {}),
+        ...(promoCode ? { promotion_applied: promoCode } : {}),
       };
       if (bank?.account_number) {
         const mins = order.expires_at ? Math.max(1, Math.round((new Date(order.expires_at).getTime() - Date.now()) / 60_000)) : null;
