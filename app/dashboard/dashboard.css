@@ -46,3 +46,46 @@ details.add > summary::-webkit-details-marker { display: none; }
   .main { padding: 20px var(--gutter-r) 48px var(--gutter-l); }
   .two { grid-template-columns: 1fr; }
 }
+
+/* ---------- Inbox ---------- */
+.inbox { display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr) 270px; gap: 14px; align-items: start; }
+.inbox .panel { margin: 0; }
+.inbox-list { padding: 10px; max-height: calc(100vh - 200px); overflow: auto; }
+.inbox-list ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.inbox-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pill { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line, #e3e3df); color: inherit; text-decoration: none; background: #fff; }
+.pill.on { background: #14231F; color: #F4F0E7; border-color: #14231F; }
+.inbox-row { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 8px; border-radius: 10px; color: inherit; text-decoration: none; }
+.inbox-row:hover { background: #F4F0E7; }
+.inbox-row.on { background: #EEF4DC; }
+.inbox-row .ch { width: 26px; height: 26px; border-radius: 8px; color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.inbox-row .who { min-width: 0; display: grid; }
+.inbox-row .who b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-row .who small { color: var(--ink-70); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-row.unread .who b::after { content: " ●"; color: #2F8F4E; }
+.inbox-row .meta { display: grid; justify-items: end; gap: 2px; font-size: 11px; color: var(--ink-70); }
+.tag { font-style: normal; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px; }
+.tag.ai { background: #E3F5EA; color: #1E7A45; } .tag.human { background: #FBF0DC; color: #8A5A0B; } .tag.ad { background: #E6EEFF; color: #1F4FD1; }
+.inbox-thread { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto auto; min-height: 520px; max-height: calc(100vh - 200px); padding: 0; overflow: hidden; }
+.thread-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid var(--line, #e7e7e3); }
+.thread-head .attr { font-size: 12px; color: var(--ink-70); margin-top: 3px; }
+.handoff { background: #FBF0DC; color: #8A5A0B; font-size: 13px; padding: 8px 16px; }
+.thread { overflow: auto; padding: 14px 16px; display: grid; gap: 8px; align-content: start; background: #FBFAF6; }
+.bubble { max-width: 78%; padding: 8px 11px; border-radius: 14px; font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
+.bubble.user { justify-self: start; background: #fff; border: 1px solid var(--line, #e7e7e3); }
+.bubble.assistant { justify-self: end; background: #14231F; color: #F4F0E7; }
+.bubble.human { justify-self: end; background: #C8EE72; color: #14231F; }
+.bubble .by { display: block; font-size: 11px; opacity: .65; margin-bottom: 2px; }
+.bubble .att { font-size: 12px; opacity: .8; }
+.bubble .dl { display: block; font-size: 11px; opacity: .7; margin-top: 3px; text-align: right; }
+.bubble .dl.failed { color: #FF9C8A; opacity: 1; }
+.bubble.human .dl.failed { color: #B42318; }
+.window { font-size: 13px; padding: 8px 16px; background: #FDECEA; color: #8C2A1C; }
+.window.ok { background: #E6EEFF; color: #1F4FD1; }
+.reply { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line, #e7e7e3); align-items: flex-end; }
+.reply textarea, .reply select { flex: 1; }
+.reply .hint { font-size: 13px; color: var(--ink-70); margin: 0; }
+.inbox-side h3 { margin: 0 0 8px; font-size: 15px; }
+.sr { position: absolute; left: -9999px; }
+@media (max-width: 1100px) { .inbox { grid-template-columns: minmax(230px, 290px) minmax(0, 1fr); } .inbox-side { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .inbox-side .panel { margin-top: 0 !important; } }
+@media (max-width: 760px) { .inbox { grid-template-columns: 1fr; } .inbox-list { max-height: 300px; } .inbox-side { grid-template-columns: 1fr; } .bubble { max-width: 92%; } .thread-head { flex-direction: column; } }
