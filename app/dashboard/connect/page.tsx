@@ -83,7 +83,7 @@ async function connectWhatsApp(formData: FormData) {
 
   const { error } = await db.from("channel_connections").upsert({
     workspace_id: ctx.workspace.id, provider: "whatsapp", external_id: phoneId, display_name: label,
-    access_token_enc: encryptSecret(token), status: "active", last_error: null,
+    access_token_enc: encryptSecret(token), status: "active", last_error: null, waba_id: wabaId || null,
   }, { onConflict: "provider,external_id" });
   if (error) back("whatsapp", "error=save");
   await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, actor_id: ctx.user.id, action: "channel.whatsapp_connected", entity: "workspace", entity_id: ctx.workspace.id, details: { phone_number_id: phoneId } });

@@ -47,6 +47,26 @@ const tools: Anthropic.Tool[] = [
     description: "Look up an order's payment status by its reference (e.g. MAM-7KQ2X9PD). Use this before telling anyone their payment is confirmed.",
     input_schema: { type: "object", required: ["reference"], properties: { reference: { type: "string" } } },
   },
+  {
+    name: "save_lead",
+    description: "Save or update this customer as a lead once you know what they want. Only include phone or email the customer gave you in this chat. Set consent_contact true only if they agreed to be contacted later. Use status sales_ready when they want to buy or book but need the team (custom quote, bulk order, viewing, call back).",
+    input_schema: {
+      type: "object", required: ["interest", "status"],
+      properties: {
+        name: { type: "string" }, phone: { type: "string" }, email: { type: "string" },
+        interest: { type: "string", description: "What they want, in a few words" },
+        budget: { type: "string" },
+        status: { type: "string", enum: ["qualified", "sales_ready"] },
+        consent_contact: { type: "boolean" },
+        notes: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "handoff_to_human",
+    description: "Hand this chat to a team member and stop replying. Use when the customer asks for a person, is upset or complaining, asks about a refund, or needs something you cannot do.",
+    input_schema: { type: "object", required: ["reason"], properties: { reason: { type: "string", description: "One line for the team" } } },
+  },
 ];
 
 function systemPrompt(agent: AgentRow, businessName: string, profile: string) {
@@ -69,6 +89,8 @@ Rules you never break:
 - Never say a payment is confirmed unless check_order says "PAID and confirmed". A transfer screenshot is not proof; say it is being checked.
 - Never ask for card numbers, PINs, OTPs or banking passwords.
 - If you cannot help, say a team member will follow up.
+- Leads: once you know what the customer wants, call save_lead. Before taking a phone number or email for follow-up, ask if it's okay for the team to contact them, and set consent_contact from their answer. Never invent contact details.
+- Hand over with handoff_to_human when the customer asks for a person, complains, wants a refund, or you can't help. After handing over, tell them a team member will reply here soon, and stop selling.
 Keep replies short and friendly, like a WhatsApp message.`;
 }
 
@@ -123,6 +145,28 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         };
       }
       return { ...base, checkout_link: checkoutUrl(order.public_token), next_step: "Share the checkout link; the customer pays there." };
+    }
+    if (name === "save_lead") {
+      const { data: conv } = await db.from("conversations").select("channel,ad_id,outcome").eq("id", ctx.conversationId).single();
+      const status = input.status === "sales_ready" ? "sales_ready" : "qualified";
+      const clean = (v: unknown, n = 200) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
+      const row = {
+        workspace_id: ws, conversation_id: ctx.conversationId, channel: conv?.channel ?? null, ad_id: conv?.ad_id ?? null,
+        name: clean(input.name, 120), phone: clean(input.phone, 40), email: clean(input.email, 160),
+        interest: clean(input.interest, 300), budget: clean(input.budget, 80), status,
+        consent_contact: input.consent_contact === true, notes: clean(input.notes, 500), updated_at: new Date().toISOString(),
+      };
+      const { error } = await db.from("leads").upsert(row, { onConflict: "conversation_id" });
+      if (error) throw new Error(error.message);
+      await db.from("conversations").update({
+        ...(conv?.outcome === "open" ? { outcome: "qualified" } : {}),
+        ...(status === "sales_ready" ? { unread: true, handoff_reason: `Sales-ready lead: ${row.interest ?? "see chat"}` } : {}),
+      }).eq("id", ctx.conversationId);
+      return { saved: true, status, next_step: status === "sales_ready" ? "Tell the customer a team member will follow up shortly." : "Continue helping them." };
+    }
+    if (name === "handoff_to_human") {
+      await db.from("conversations").update({ ai_paused: true, unread: true, handoff_reason: String(input.reason ?? "Customer needs a person").slice(0, 300) }).eq("id", ctx.conversationId);
+      return { handed_over: true, next_step: "Tell the customer a team member will reply here soon. Do not keep selling." };
     }
     if (name === "check_order") {
       const { data } = await db.from("orders").select("reference,status,total_kobo,pay_on_delivery").eq("workspace_id", ws)

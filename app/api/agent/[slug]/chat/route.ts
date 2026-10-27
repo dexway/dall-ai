@@ -29,28 +29,38 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (!agent) return NextResponse.json({ error: "This assistant is not available." }, { status: 404 });
 
   // Resume only a conversation this visitor owns
-  let conversation: { id: string; visitor_token: string } | null = null;
+  let conversation: { id: string; visitor_token: string; ai_paused?: boolean } | null = null;
   if (parsed.data.conversationId && parsed.data.visitorToken) {
-    const { data } = await db.from("conversations").select("id,visitor_token")
+    const { data } = await db.from("conversations").select("id,visitor_token,ai_paused")
       .eq("id", parsed.data.conversationId).eq("agent_id", agent.id).eq("visitor_token", parsed.data.visitorToken).maybeSingle();
     conversation = data;
   }
   if (!conversation) {
     const { data, error } = await db.from("conversations").insert({ workspace_id: ws.id, agent_id: agent.id, channel: "web" })
-      .select("id,visitor_token").single();
+      .select("id,visitor_token,ai_paused").single();
     if (error) return NextResponse.json({ error: "Could not start a chat." }, { status: 500 });
     conversation = data;
   }
 
   const { data: past } = await db.from("messages").select("role,content").eq("conversation_id", conversation.id)
     .order("created_at", { ascending: false }).limit(AI.maxHistoryMessages);
-  const history: Anthropic.MessageParam[] = (past ?? []).reverse().map((m) => ({ role: m.role as "user" | "assistant", content: String(m.content.text ?? "") }));
+  const history: Anthropic.MessageParam[] = (past ?? []).reverse()
+    .map((m) => ({ role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant", content: String(m.content.text ?? "") }))
+    .filter((m) => m.content);
 
   await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "user", content: { text: message } });
+  const now = new Date().toISOString();
+  await db.from("conversations").update({ last_message_at: now, last_inbound_at: now, unread: true }).eq("id", conversation.id);
+
+  // A team member took over this chat: store the message for them and don't let the AI answer.
+  if (conversation.ai_paused) {
+    return NextResponse.json({ reply: null, handedOver: true, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
+  }
 
   try {
     const reply = await runAgentTurn({ agent, businessName: ws.name, conversationId: conversation.id, history, userText: message, profile: profileText(ws.business_profile as BusinessProfile) });
-    await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "assistant", content: { text: reply } });
+    await db.from("messages").insert({ conversation_id: conversation.id, workspace_id: ws.id, role: "assistant", content: { text: reply }, delivery_status: "delivered" });
+    await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", conversation.id);
     return NextResponse.json({ reply, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
   } catch (e) {
     if (e instanceof GatewayError) {
@@ -71,5 +81,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
   const u = new URL(req.url);
   const found = await findConversation(slug, u.searchParams.get("c"), u.searchParams.get("v"));
   if (!found) return NextResponse.json({ pending: null });
-  return NextResponse.json({ pending: await pendingOrder(found.conv.id) });
+  // Team replies typed in the inbox since the visitor's last check.
+  const after = u.searchParams.get("after");
+  let team: { text: string; at: string }[] = [];
+  if (after && !Number.isNaN(Date.parse(after))) {
+    const { data } = await supabaseAdmin().from("messages").select("content,created_at").eq("conversation_id", found.conv.id)
+      .eq("role", "human").gt("created_at", new Date(after).toISOString()).order("created_at").limit(20);
+    team = (data ?? []).map((m) => ({ text: String((m.content as { text?: string }).text ?? ""), at: m.created_at }));
+  }
+  return NextResponse.json({ pending: await pendingOrder(found.conv.id), team });
 }

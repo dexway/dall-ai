@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-type Msg = { role: "user" | "assistant" | "err"; text: string };
+type Msg = { role: "user" | "assistant" | "err" | "human"; text: string };
 type Pending = { reference: string; total_kobo: number; expires_at: string | null; status: string; pay_on_delivery?: boolean; pod_offered?: boolean } | null;
 type Props = { slug: string; business: string; agent: { name: string; role: string; greeting: string; avatar: string | null; color: string } };
 
@@ -63,6 +63,23 @@ export default function ChatBox({ slug, business, agent }: Props) {
       }
     } catch { /* fresh chat */ }
   }, [key, slug]);
+  // Poll for replies a team member types in the inbox (every 15s while the chat is open).
+  const lastSeen = useRef<string>(new Date().toISOString());
+  useEffect(() => {
+    if (!ids.conversationId) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/agent/${slug}/chat?c=${ids.conversationId}&v=${ids.visitorToken}&after=${encodeURIComponent(lastSeen.current)}`);
+        const b = await r.json();
+        if (b.pending !== undefined) setPending(b.pending);
+        if (b.team?.length) {
+          lastSeen.current = b.team[b.team.length - 1].at;
+          setMsgs((m) => [...m, ...b.team.map((x: { text: string }) => ({ role: "human" as const, text: x.text }))]);
+        }
+      } catch { /* offline: try next tick */ }
+    }, 15_000);
+    return () => clearInterval(t);
+  }, [ids.conversationId, ids.visitorToken, slug]);
   useEffect(() => {
     try { localStorage.setItem(key, JSON.stringify({ ids, msgs: msgs.slice(-40) })); } catch { /* storage off */ }
     log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
@@ -79,7 +96,8 @@ export default function ChatBox({ slug, business, agent }: Props) {
       const body = await res.json();
       if (body.conversationId) setIds({ conversationId: body.conversationId, visitorToken: body.visitorToken });
       if ("pending" in body) setPending(body.pending);
-      setMsgs((m) => [...m, res.ok ? { role: "assistant", text: body.reply } : { role: "err", text: body.error ?? "Something went wrong." }]);
+      if (res.ok && body.handedOver) setMsgs((m) => [...m, { role: "assistant", text: `Thanks, ${business}'s team has your message and will reply here.` }]);
+      else setMsgs((m) => [...m, res.ok ? { role: "assistant", text: body.reply } : { role: "err", text: body.error ?? "Something went wrong." }]);
     } catch {
       setMsgs((m) => [...m, { role: "err", text: "No connection. Check your data and try again." }]);
     } finally { setBusy(false); }
@@ -131,7 +149,7 @@ export default function ChatBox({ slug, business, agent }: Props) {
       )}
 
       <div className="chat-log" ref={log} aria-live="polite">
-        {msgs.map((m, i) => <div key={i} className={`msg ${m.role}`}>{m.role === "assistant" ? linkify(m.text) : m.text}</div>)}
+        {msgs.map((m, i) => <div key={i} className={`msg ${m.role === "human" ? "assistant" : m.role}`}>{m.role === "human" && <small style={{ display: "block", fontSize: 11, opacity: .7 }}>{business} team</small>}{m.role !== "user" ? linkify(m.text) : m.text}</div>)}
         {busy && <div className="typing">{agent.name} is typing…</div>}
       </div>
       <form className="composer glass" onSubmit={send}>
