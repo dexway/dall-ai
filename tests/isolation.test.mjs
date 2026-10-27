@@ -86,3 +86,11 @@ test("message roles allow team replies but nothing else", async () => {
   const conv = (await one(`select id from conversations where workspace_id = $1`, [wsA])).id;
   await assert.rejects(db.query(`insert into messages (conversation_id, workspace_id, role, content) values ($1,$2,'system','{}')`, [conv, wsA]), /check/);
 });
+
+test("rate limiter counts per key and window, and signed-in users can't call it", async () => {
+  const hit = async () => (await one(`select hit_rate_limit('t:1', 3, 60) as ok`)).ok;
+  assert.deepEqual([await hit(), await hit(), await hit(), await hit()], [true, true, true, false]);
+  assert.equal((await one(`select hit_rate_limit('t:2', 3, 60) as ok`)).ok, true);
+  await as(A, async () => { await assert.rejects(db.query(`select hit_rate_limit('t:3', 3, 60)`), /permission denied/); });
+  await as(A, async () => { assert.equal((await db.query(`select * from rate_limits`)).rows.length, 0); });
+});

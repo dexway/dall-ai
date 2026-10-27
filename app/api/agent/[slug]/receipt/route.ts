@@ -3,10 +3,15 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { findConversation, pendingOrder } from "@/lib/chat-session";
 import { submitEvidence, EvidenceError } from "@/lib/evidence";
 import { formatNaira } from "@/lib/money";
+import { clientIp, withinLimits } from "@/lib/rate-limit";
 
 // In-chat 📎 upload: the customer sends their transfer screenshot for the order in this chat.
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  // Each receipt is read by AI: cap uploads per IP.
+  if (!(await withinLimits([{ key: `receipt-ip:${clientIp(req)}`, limit: 10, windowSeconds: 3_600 }]))) {
+    return NextResponse.json({ error: "Too many uploads. Please wait a little and try again." }, { status: 429 });
+  }
   const form = await req.formData().catch(() => null);
   if (!form) return NextResponse.json({ error: "Send the screenshot as a file." }, { status: 400 });
   const found = await findConversation(slug, String(form.get("conversationId") ?? ""), String(form.get("visitorToken") ?? ""));

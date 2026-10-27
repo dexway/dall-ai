@@ -6,11 +6,15 @@ import { decryptSecret } from "@/lib/crypto";
 import { initializeTransaction } from "@/lib/paystack";
 import { submitEvidence, EvidenceError } from "@/lib/evidence";
 import { serverEnv } from "@/lib/env";
+import { clientIp, withinLimits } from "@/lib/rate-limit";
 
 // Customer-facing checkout actions. The order token in the URL is the only credential.
 
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  if (!(await withinLimits([{ key: `pay-ip:${clientIp(req)}`, limit: 30, windowSeconds: 600 }]))) {
+    return NextResponse.json({ error: "Too many attempts. Please wait a few minutes." }, { status: 429 });
+  }
   const c = await loadCheckout(token);
   if (!c) return NextResponse.json({ error: "Order not found." }, { status: 404 });
   const db = supabaseAdmin();

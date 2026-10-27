@@ -117,7 +117,14 @@ export async function gatewayCall(req: GatewayRequest): Promise<Anthropic.Messag
   const db = supabaseAdmin();
   const { model, rate, maxOutput } = await loadPolicy(req.workspaceId, req.model);
   const maxTokens = Math.min(req.maxTokens ?? maxOutput, maxOutput);
-  if (freeMode()) return freeCall(req, model, rate, maxTokens);
+  if (freeMode()) {
+    // Free early access has no credit balance to stop runaway use, so cap AI calls per business per day.
+    const cap = Number(process.env.FREE_DAILY_AI_CALLS) || 800;
+    const { data: ok, error: capErr } = await db.rpc("hit_rate_limit", { p_key: `ai-day:${req.workspaceId}`, p_limit: cap, p_window_seconds: 86_400 });
+    if (capErr) console.error("[gateway] daily cap check failed", capErr.message);
+    if (ok === false) throw new GatewayError("DAILY_CAP", 402, "This assistant has reached today's free limit. It will be back tomorrow.");
+    return freeCall(req, model, rate, maxTokens);
+  }
   // images are billed by size (~1,600 tokens for a phone screenshot), not by their base64 length
   const msgChars = JSON.stringify(req.messages, (k, v) => (k === "data" && typeof v === "string" && v.length > 1000 ? "x".repeat(5000) : v)).length;
   const inputChars = req.system.length + msgChars + JSON.stringify(req.tools ?? []).length;

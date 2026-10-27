@@ -6,6 +6,7 @@ import { BUILTIN_PRESETS } from "@/lib/presets";
 import { extractText } from "@/lib/extract";
 import Studio from "./Studio";
 import AgentChannels from "./AgentChannels";
+import { fetchPublicPage, checkUrlShape } from "@/lib/net-guard";
 import LaunchKit from "./LaunchKit";
 
 const KNOWLEDGE_CAP = 16000;
@@ -70,14 +71,12 @@ async function learnFromWebsite(formData: FormData) {
   const ctx = await requireWorkspace();
   if (!canManage(ctx)) redirect("/dashboard/agent?error=role");
   const url = String(formData.get("website_url") ?? "").trim();
-  let host = "";
-  try { host = new URL(url).hostname; } catch { redirect("/dashboard/agent?error=url"); }
-  if (!/^https?:$/i.test(new URL(url).protocol) || /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|0\.|::1|\[)/i.test(host)) redirect("/dashboard/agent?error=url");
+  try { checkUrlShape(url); } catch { redirect("/dashboard/agent?error=url"); }
 
   let text = "";
   try {
-    const res = await fetch(url, { headers: { "User-Agent": "DallAI-bot/1.0" }, signal: AbortSignal.timeout(10000) });
-    const html = (await res.text()).slice(0, 400000);
+    // Public pages only: private/internal addresses are refused at connect time, redirects re-checked.
+    const html = (await fetchPublicPage(url)).slice(0, 400000);
     text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
   } catch { redirect("/dashboard/agent?error=fetch"); }

@@ -7,6 +7,7 @@ import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
 import { findConversation, pendingOrder } from "@/lib/chat-session";
 import { profileText, type BusinessProfile } from "@/lib/business-profile";
+import { clientIp, withinLimits, CHAT_LIMITS } from "@/lib/rate-limit";
 
 // Public web-widget endpoint. Anyone can chat; every reply is metered to the business that owns the agent.
 const Body = z.object({
@@ -20,6 +21,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Message is empty or too long." }, { status: 400 });
   const { message } = parsed.data;
+  // Anyone can reach this endpoint and every message costs an AI call: cap it per IP, chat and business.
+  if (!(await withinLimits(CHAT_LIMITS(clientIp(req), slug, parsed.data.conversationId)))) {
+    return NextResponse.json({ error: "You're sending messages too quickly. Please wait a minute and try again." }, { status: 429 });
+  }
   const db = supabaseAdmin();
 
   const { data: ws } = await db.from("workspaces").select("id,name,status,business_profile").eq("slug", slug).maybeSingle();
