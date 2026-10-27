@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin, supabaseUser } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
-import { exchangeFacebookCode, listPages, subscribePage, longLivedToken, listAdAccounts } from "@/lib/meta";
+import { exchangeFacebookCode, listPages, subscribePage, longLivedToken, listAdAccounts, listPermissions } from "@/lib/meta";
 import { serverEnv } from "@/lib/env";
-import { FB_REDIRECT_PATH, stateValid } from "@/lib/meta-oauth";
+import { FB_REDIRECT_PATH, FACEBOOK_SCOPES, stateValid } from "@/lib/meta-oauth";
 
 // Facebook sends the owner back here with a code. We save each Page the owner picked, and its linked Instagram account.
 export async function GET(req: Request) {
@@ -30,10 +30,11 @@ export async function GET(req: Request) {
     .eq("workspace_id", wsId).eq("user_id", user.id).maybeSingle();
   if (!member || !(member.role === "owner" || member.role === "admin")) return back("error=role");
 
-  let pages, adAccounts, userToken;
+  let pages, adAccounts, userToken, perms = { granted: [] as string[], declined: [] as string[] };
   try {
     const shortToken = await exchangeFacebookCode(code, `${site}${FB_REDIRECT_PATH}`);
     userToken = await longLivedToken(shortToken);
+    perms = await listPermissions(userToken);
     pages = await listPages(userToken);
     adAccounts = await listAdAccounts(userToken).catch(() => []); // ads are optional; don't fail the whole connect
   } catch (e) {
@@ -52,7 +53,7 @@ export async function GET(req: Request) {
 
     const enc = encryptSecret(p.access_token);
     await db.from("channel_connections").upsert({
-      workspace_id: wsId, provider: "facebook", external_id: p.id, display_name: p.name, access_token_enc: enc, status: "active", last_error: null,
+      workspace_id: wsId, provider: "facebook", external_id: p.id, display_name: p.name, access_token_enc: enc, status: "active", last_error: null, scopes: perms.granted,
     }, { onConflict: "provider,external_id" });
     pagesSaved++;
 
@@ -60,7 +61,7 @@ export async function GET(req: Request) {
     if (ig) {
       await db.from("channel_connections").upsert({
         workspace_id: wsId, provider: "instagram", external_id: ig.id,
-        display_name: ig.username ? `@${ig.username}` : null, access_token_enc: enc, status: "active", last_error: null,
+        display_name: ig.username ? `@${ig.username}` : null, access_token_enc: enc, status: "active", last_error: null, scopes: perms.granted,
       }, { onConflict: "provider,external_id" });
       igSaved++;
     }
@@ -80,7 +81,9 @@ export async function GET(req: Request) {
 
   await db.from("financial_audit_logs").insert({ workspace_id: wsId, actor_id: user.id, action: "channel.meta_connected", entity: "workspace", entity_id: wsId, details: { pages: pagesSaved, instagram: igSaved, skipped, ad_accounts: adsSaved } });
 
-  const res = back(`saved=facebook&pages=${pagesSaved}&ig=${igSaved}&skipped=${skipped}&ads=${adsSaved}`);
+  // Permissions the person unticked on Meta's screen (only ones we asked for). Shown on Channels so they can fix it.
+  const missing = FACEBOOK_SCOPES.filter((s) => perms.granted.length && !perms.granted.includes(s));
+  const res = back(`saved=facebook&pages=${pagesSaved}&ig=${igSaved}&skipped=${skipped}&ads=${adsSaved}${missing.length ? `&declined=${encodeURIComponent(missing.join(","))}` : ""}`);
   res.cookies.set("meta_oauth", "", { path: "/api/meta/facebook", maxAge: 0 });
   return res;
 }

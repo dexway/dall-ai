@@ -5,6 +5,7 @@ import { publicAssetUrl, supabaseAdmin } from "@/lib/supabase/server";
 import { BUILTIN_PRESETS } from "@/lib/presets";
 import { extractText } from "@/lib/extract";
 import Studio from "./Studio";
+import AgentChannels from "./AgentChannels";
 import LaunchKit from "./LaunchKit";
 
 const KNOWLEDGE_CAP = 16000;
@@ -168,6 +169,10 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
         save={save} learnFromWebsite={learnFromWebsite} saveAsPreset={saveAsPreset}
         addKnowledgeFiles={addKnowledgeFiles} clearKnowledge={clearKnowledge}
       />
+
+      <div style={{ marginTop: 16 }}>
+        <AgentChannels workspaceId={ctx.workspace.id} agentName={a.name} />
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <LaunchKit agent={{ name: a.name, role: a.role_title, color: a.accent_color, avatar: avatarUrl, languages: a.languages }}

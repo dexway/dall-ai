@@ -68,6 +68,14 @@ export async function longLivedToken(shortToken: string): Promise<string> {
   return json.access_token;
 }
 
+/** Which permissions the person actually granted (they can untick some on Meta's screen). */
+export async function listPermissions(userToken: string): Promise<{ granted: string[]; declined: string[] }> {
+  const res = await fetch(`${graph()}/me/permissions`, { headers: { Authorization: `Bearer ${userToken}` } });
+  if (!res.ok) return { granted: [], declined: [] };
+  const rows = ((await res.json()) as { data?: { permission: string; status: string }[] }).data ?? [];
+  return { granted: rows.filter((r) => r.status === "granted").map((r) => r.permission), declined: rows.filter((r) => r.status !== "granted").map((r) => r.permission) };
+}
+
 export type MetaAdAccount = { id: string; name?: string; currency?: string; account_status?: number };
 
 /** Lists the ad accounts the person manages, so the business can pick which one Dall AI runs ads on. */

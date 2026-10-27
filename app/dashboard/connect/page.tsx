@@ -311,6 +311,11 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
         Connected {sp.pages ?? 0} Facebook Page{sp.pages === "1" ? "" : "s"}, {sp.ig ?? 0} Instagram account{sp.ig === "1" ? "" : "s"}{Number(sp.ads) > 0 ? ` and ${sp.ads} ad account${sp.ads === "1" ? "" : "s"}` : ""}.
         {Number(sp.skipped) > 0 ? ` ${sp.skipped} skipped: already connected to another business, or Meta didn't allow it.` : ""}
       </div>}
+      {sp.declined && <div className="notice notice-bad" role="alert">
+        You unticked some permissions on Meta&apos;s screen: <span className="mono">{sp.declined.split(",").join(", ")}</span>. Features that need them won&apos;t work
+        ({sp.declined.includes("ads_management") || sp.declined.includes("pages_manage_ads") ? "ads, " : ""}{sp.declined.includes("pages_messaging") || sp.declined.includes("instagram_manage_messages") ? "replying to messages, " : ""}and related settings).{" "}
+        <a href="/api/meta/facebook/start">Connect via Meta again</a> and keep every box ticked.
+      </div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "210px minmax(0,1fr)", gap: 20, alignItems: "start" }}>
         <nav className="panel" style={{ padding: 10, position: "sticky", top: 16 }}>
