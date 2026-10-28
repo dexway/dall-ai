@@ -304,7 +304,7 @@ export default function Landing() {
       </main>
 
       <footer className="foot">
-        <div className="wrap"><span>© {new Date().getFullYear()} {BRAND.name} · Lagos, Nigeria</span><span>{BRAND.supportEmail}</span></div>
+        <div className="wrap"><span>© {new Date().getFullYear()} {BRAND.name} · Lagos, Nigeria</span><span><a href="/privacy">Privacy</a> · <a href="/data-deletion">Delete your data</a> · {BRAND.supportEmail}</span></div>
       </footer>
     </div>
   );
