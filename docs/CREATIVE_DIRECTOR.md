@@ -101,3 +101,12 @@ models, best first. Production defaults to "Auto": it picks the highest-ranked E
 as signed URLs in the model's `image_param` so edits/animations keep the real product.
 Migration 0018 seeds the recommended catalogue DISABLED with placeholder prices. Before enabling one in /admin/creative, confirm its
 path, parameters and real price on Higgsfield.
+
+## Autopilot (0020) — runs in /api/cron/marketing every 5 min
+1. New deals: promotions with "announce" broadcast once to opted-in Messenger/Instagram customers (24h window).
+2. Publish: approved+generated Facebook/Instagram items are scheduled at planned_date + publish_hour (Lagos) and posted
+   (FB /photos|/videos, IG container → FINISHED → media_publish). Never double-posts (post_refs). Retries 3x on transient errors.
+3. Generate: approved items due within 3 days get an auto spec + generation, only within the owner's monthly cap
+   (saved as an org media_usd quota) and the platform cap.
+4. Plan: from the 20th, drafts next month's calendar from the approved strategy; items still need owner approval.
+Needs Meta permissions pages_manage_posts + instagram_content_publish (add to the Facebook Login configuration, App Review, reconnect).

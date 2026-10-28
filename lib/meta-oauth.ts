@@ -9,7 +9,7 @@ import { serverEnv } from "@/lib/env";
 export const FACEBOOK_SCOPES = [
   "pages_show_list", "pages_messaging", "pages_manage_metadata", "pages_read_engagement",
   "business_management", "ads_management", "ads_read", "pages_manage_ads",
-  "instagram_basic", "instagram_manage_messages",
+  "instagram_basic", "instagram_manage_messages", "pages_manage_posts", "instagram_content_publish",
 ];
 
 export const FB_REDIRECT_PATH = "/api/meta/facebook/callback";

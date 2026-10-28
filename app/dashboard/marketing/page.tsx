@@ -39,6 +39,7 @@ async function savePromo(formData: FormData) {
   const { error } = await supabaseAdmin().from("promotions").insert({
     workspace_id: ctx.workspace.id, code, title, kind, value, min_order_kobo: min, max_uses: maxUses,
     ends_at: ends ? new Date(`${ends}T23:59:00+01:00`).toISOString() : null, item_ids: items.length ? items : null,
+    announce: formData.get("announce") === "on", announce_message: String(formData.get("announce_message") ?? "").trim().slice(0, 600) || null,
   });
   if (error) back(error.code === "23505" ? "error=promo_dup" : "error=save");
   revalidatePath("/dashboard/marketing");
@@ -211,6 +212,9 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
           <label className="field"><span>Max uses</span><input name="max_uses" type="number" min={1} className="input" placeholder="Unlimited" /></label>
           <label className="field"><span>Ends</span><input name="ends_at" type="date" className="input" /></label>
           <label className="field"><span>Only these items</span><select name="item_ids" multiple className="input" style={{ minHeight: 70 }}>{(items ?? []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select></label>
+          <label style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14 }}><input type="checkbox" name="announce" defaultChecked style={{ marginTop: 3 }} />
+            <span><b>Announce this deal automatically</b><br /><small style={{ color: "var(--ink-70)" }}>Within 5 minutes, your assistant messages customers who agreed to offers on Instagram and Messenger (people who chatted in the last 24 hours, Meta&apos;s rule). Everyone can reply STOP.</small></span></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span>Announcement (optional)</span><input name="announce_message" className="input" placeholder="Leave empty and we'll write: New deal: Weekend party deal. 10% off with code JOLLOF10. Reply here to order!" /></label>
           <div style={{ alignSelf: "end" }}><button className="btn btn-ink">Add promotion</button></div>
         </form>
       </section>

@@ -3,8 +3,9 @@ import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { runDueFollowups, sendBroadcast } from "@/lib/marketing";
 import { pollCreativeJobs } from "@/lib/creative/jobs";
+import { runAutopilot } from "@/lib/autopilot";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -27,5 +28,7 @@ export async function POST(req: Request) {
   for (const b of sending ?? []) await sendBroadcast(b.id, 8_000);
   // Creative generation jobs: poll provider status, store finished outputs.
   const creative = await pollCreativeJobs(15_000);
-  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative });
+  // Autopilot: announce new deals, publish due posts, generate within the owner's cap, plan next month.
+  const autopilot = await runAutopilot(120_000);
+  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot });
 }

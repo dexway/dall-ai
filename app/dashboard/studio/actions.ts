@@ -256,3 +256,21 @@ export async function generateBatch(formData: FormData) {
   revalidatePath("/dashboard/studio");
   go(brand!.id, "production", `saved=generating&n=${jobs.length}`);
 }
+
+/** Owner turns autopilot pieces on. The generation cap becomes this business's own monthly media limit. */
+export async function saveAutopilot(formData: FormData) {
+  const { brand, ctx } = await own(formData);
+  if (!brand) go(null, "autopilot", "error=brand");
+  const cap = Math.max(0, Math.min(1000, Number(formData.get("cap")) || 0));
+  const on = (k: string) => formData.get(k) === "on";
+  const channels = ["facebook", "instagram"].filter((c) => formData.get(`ch_${c}`) === "on");
+  const db = supabaseAdmin();
+  await db.from("creative_autopilot").upsert({
+    workspace_id: ctx.workspace.id, brand_id: brand!.id, auto_plan: on("auto_plan"), auto_generate: on("auto_generate") && cap > 0, auto_publish: on("auto_publish"),
+    monthly_media_cap_usd: cap, publish_hour: Math.min(23, Math.max(0, Math.round(Number(formData.get("hour")) || 18))), channels, updated_by: ctx.user.id, updated_at: new Date().toISOString(),
+  });
+  await db.from("quota_policies").upsert({ scope: "org", scope_id: ctx.workspace.id, resource: "media_usd", period: "month", limit_amount: cap, enabled: true, updated_by: ctx.user.id }, { onConflict: "scope,scope_id,resource,period" });
+  await log(ctx.workspace.id, "generation", brand!.id, "edit", ctx.user.id, "Autopilot settings changed", { auto_plan: on("auto_plan"), auto_generate: on("auto_generate"), auto_publish: on("auto_publish"), cap, channels });
+  revalidatePath("/dashboard/studio");
+  go(brand!.id, "autopilot", "saved=autopilot");
+}

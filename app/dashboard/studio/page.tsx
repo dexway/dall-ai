@@ -11,12 +11,12 @@ import "./studio.css";
 export const metadata = { title: "Content Creator" };
 export const maxDuration = 300;
 
-const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["usage", "Usage"]] as const;
+const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["autopilot", "Autopilot"], ["usage", "Usage"]] as const;
 const OBJECTIVES = ["awareness", "engagement", "leads", "bookings", "sales", "retention", "other"];
 const PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "whatsapp"];
 const STATUS_LABEL: Record<string, string> = { draft: "Draft", awaiting_approval: "Awaiting approval", approved: "Approved", rejected: "Rejected", revision_requested: "Revision requested", generation_queued: "Generation queued", generating: "Generating", generated: "Ready for review", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
 const ERR: Record<string, string> = { role: "Only owners and admins can change the Creative Director.", brand: "Pick or create a brand first.", brief: "Check the brief", asset: "Brand files must be PNG, JPG, WEBP or PDF under 4 MB.", account: "Add at least one account.", running: "Research is already running for this brand.", ai: "The Creative Director couldn't finish that", state: "That step isn't available right now", locked: "Approved items are locked. Request a revision to change them.", model: "Pick a model an admin has enabled.", confirm: "Tick the box to confirm the spend.", quota: "Generation blocked" };
-const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
+const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
 
 function Chip({ s }: { s: string }) { return <span className={`chip st-${s}`}>{STATUS_LABEL[s] ?? s.replace(/_/g, " ")}</span>; }
 function Sources({ urls, map }: { urls: string[]; map: Map<string, string> }) {
@@ -331,6 +331,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
 
       {tab === "production" && <Production B={B} ws={ws} models={(models ?? []) as ModelRow[]} sp={sp} />}
       {tab === "usage" && <Usage ws={ws} B={B} userId={ctx.user.id} />}
+      {tab === "autopilot" && <Autopilot B={B} ws={ws} />}
     </>
   );
 }
@@ -425,6 +426,42 @@ async function Usage({ ws, B, userId }: { ws: string; B: string; userId: string 
       <ul>{[...new Set(charges.map((c) => c.model).filter(Boolean))].map((m) => <li key={m}>{m}: {charges.filter((c) => c.model === m).length} charge(s)</li>)}</ul>
       <h3>Held budget</h3>
       {!(holds ?? []).length ? <p className="muted">Nothing held.</p> : <ul>{(holds ?? []).map((h, i) => <li key={i}><small>{h.resource} · {Number(h.amount)} · {h.job_ref.split(":")[0]} · since {new Date(h.created_at).toLocaleString("en-NG")}</small></li>)}</ul>}
+    </section>
+  );
+}
+
+async function Autopilot({ B, ws }: { B: string; ws: string }) {
+  const db = supabaseAdmin();
+  const [{ data: a }, { data: conns }, { data: posts }] = await Promise.all([
+    db.from("creative_autopilot").select("*").eq("workspace_id", ws).maybeSingle(),
+    db.from("channel_connections").select("provider,status").eq("workspace_id", ws).in("provider", ["facebook", "instagram"]),
+    db.from("content_items").select("id,planned_date,platform,format,idea,publish_status,publish_at,published_at,publish_error").eq("brand_id", B).not("publish_status", "is", null).order("publish_at", { ascending: false }).limit(20),
+  ]);
+  const live = (p: string) => (conns ?? []).some((c) => c.provider === p && c.status === "active");
+  const chans = (a?.channels as string[] | undefined) ?? ["facebook", "instagram"];
+  return (
+    <section className="panel">
+      <h2>Autopilot</h2>
+      <p className="muted">Your Creative Director runs the plan for you. You still approve each post idea; autopilot handles the rest on schedule.</p>
+      <form action={A.saveAutopilot} className="cd-form">
+        <input type="hidden" name="b" value={B} />
+        <label className="row"><input type="checkbox" name="auto_plan" defaultChecked={a?.auto_plan} /> <span><b>Plan next month automatically</b> <small className="muted">On the 20th, draft next month&apos;s calendar from your approved strategy. You approve the ideas.</small></span></label>
+        <label className="row"><input type="checkbox" name="auto_generate" defaultChecked={a?.auto_generate} /> <span><b>Create approved posts automatically</b> <small className="muted">3 days before each post, pick the best model and make the image or video, never above your cap.</small></span></label>
+        <label className="field" style={{ maxWidth: 260 }}><span>Monthly creation cap (USD)</span><input name="cap" type="number" min={0} max={1000} step="0.5" className="input" defaultValue={Number(a?.monthly_media_cap_usd ?? 0)} /><small>0 = never spend automatically.</small></label>
+        <label className="row"><input type="checkbox" name="auto_publish" defaultChecked={a?.auto_publish} /> <span><b>Post automatically</b> <small className="muted">Approved, finished posts go out on their planned date.</small></span></label>
+        <div className="row wrap">
+          <label className="row"><input type="checkbox" name="ch_facebook" defaultChecked={chans.includes("facebook")} /> Facebook Page {live("facebook") ? "" : <small className="hyp">(not connected)</small>}</label>
+          <label className="row"><input type="checkbox" name="ch_instagram" defaultChecked={chans.includes("instagram")} /> Instagram {live("instagram") ? "" : <small className="hyp">(not connected)</small>}</label>
+          <label className="row">Post at <input name="hour" type="number" min={0} max={23} className="input" style={{ width: 70 }} defaultValue={a?.publish_hour ?? 18} />:00 Lagos time</label>
+        </div>
+        <small className="muted">TikTok, X and WhatsApp Status can&apos;t be posted automatically yet: those stay in your calendar to post yourself.</small>
+        <div><button className="btn btn-ink">Save autopilot</button></div>
+      </form>
+      <h3>Scheduled and posted</h3>
+      {!posts?.length ? <p className="muted">Nothing scheduled yet. Finished posts appear here once autopilot posting is on.</p> : (
+        <table className="table"><thead><tr><th>Date</th><th>Where</th><th>Post</th><th>Status</th></tr></thead><tbody>
+          {posts.map((p) => <tr key={p.id}><td>{p.planned_date}</td><td>{p.platform}</td><td>{(p.idea as { hook?: string })?.hook}</td><td><Chip s={p.publish_status === "published" ? "completed" : p.publish_status === "failed" ? "failed" : "queued"} /> {p.publish_status}{p.publish_error ? <><br /><small>{p.publish_error}</small></> : null}</td></tr>)}
+        </tbody></table>)}
     </section>
   );
 }

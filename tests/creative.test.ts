@@ -148,3 +148,24 @@ test("router: picks best enabled model for the task, needs image input for edits
   assert.equal(taskFor({ format: "reel", hasReference: true }), "animate_photo");
   assert.equal(taskFor({ format: "static_image", hasReference: false, needsText: true }), "poster");
 });
+
+import { publishInstagram, publishFacebook, buildCaption, publishTime } from "../lib/social-publish.ts";
+test("social: instagram container → wait → publish; facebook photo post; caption + Lagos time", async () => {
+  const calls: string[] = [];
+  let polls = 0;
+  const f = (async (url: string) => {
+    calls.push(String(url).replace(/^https:\/\/graph\.facebook\.com\/v[\d.]+/, ""));
+    if (String(url).includes("/media_publish")) return new Response(JSON.stringify({ id: "POST1" }));
+    if (String(url).includes("/media")) return new Response(JSON.stringify({ id: "C1" }));
+    if (String(url).includes("status_code")) return new Response(JSON.stringify({ status_code: ++polls > 1 ? "FINISHED" : "IN_PROGRESS" }));
+    if (String(url).includes("/photos")) return new Response(JSON.stringify({ id: "P", post_id: "PAGE_P" }));
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  assert.equal(await publishInstagram({ igUserId: "IG", token: "t", caption: "hi", media: { url: "u", kind: "image" }, fetcher: f, pollMs: 1 }), "POST1");
+  assert.deepEqual(calls.map((c) => c.split("?")[0]), ["/IG/media", "/C1", "/C1", "/IG/media_publish"]);
+  assert.equal(await publishFacebook({ pageId: "PG", token: "t", caption: "hi", media: { url: "u", kind: "image" }, fetcher: f }), "PAGE_P");
+  assert.equal(buildCaption({ caption: "Tasty", cta: "DM to order" }), "Tasty\n\nDM to order");
+  assert.equal(publishTime("2026-12-02", 18).toISOString(), "2026-12-02T17:00:00.000Z");
+  const denied = (async () => new Response(JSON.stringify({ error: { message: "(#200) Requires pages_manage_posts" } }), { status: 403 })) as typeof fetch;
+  await assert.rejects(publishFacebook({ pageId: "PG", token: "t", caption: "x", media: { url: "u", kind: "image" }, fetcher: denied }), /reconnect via Meta/);
+});
