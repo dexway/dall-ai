@@ -47,14 +47,12 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
     <>
       <section className="panel" ref={top} id="presets">
         <h2>Start from a ready-made assistant</h2>
-        <p style={{ color: "var(--ink-70)", fontSize: 14, marginTop: 2 }}>Each one is a complete, tested setup for that kind of business. Pick one, fill the few <b>[blanks]</b> with your details (delivery, hours, policies), and save. Edit anything else you like, then save it as your own preset.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10, marginTop: 10 }}>
+        <p style={{ color: "var(--ink-70)", fontSize: 13, marginTop: 2 }}>Pick one, fill the few <b>[blanks]</b> with your details, and save.</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           {[...builtinPresets, ...customPresets].map((p) => (
-            <button type="button" key={p.key} onClick={() => apply(p)}
-              style={{ textAlign: "left", border: applied === p.label ? "2px solid var(--lime, #C8EE72)" : "1px solid var(--line, #e5e5e5)", borderRadius: 10, padding: "10px 12px", background: "#fff", cursor: "pointer" }}>
-              <div style={{ fontSize: 20 }}>{p.emoji}</div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{p.label}</div>
-              {p.blurb && <div style={{ fontSize: 12, color: "var(--ink-70)", marginTop: 3, lineHeight: 1.4 }}>{p.blurb}</div>}
+            <button type="button" key={p.key} onClick={() => apply(p)} title={p.blurb || p.label} aria-pressed={applied === p.label}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, border: applied === p.label ? "2px solid var(--lime, #C8EE72)" : "1px solid var(--line, #e5e5e5)", borderRadius: 999, padding: "4px 10px", background: applied === p.label ? "#F3FBE0" : "#fff", cursor: "pointer", fontSize: 12.5, fontWeight: 500, lineHeight: 1.3, whiteSpace: "nowrap" }}>
+              <span aria-hidden style={{ fontSize: 14 }}>{p.emoji}</span>{p.label}
             </button>
           ))}
         </div>
