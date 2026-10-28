@@ -7,6 +7,7 @@ import { serverEnv } from "@/lib/env";
 import CopyButton from "./CopyButton";
 import { randomBytes, createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { withinLimits } from "@/lib/rate-limit";
 
 export const metadata = { title: "Payment settings" };
 
@@ -59,6 +60,30 @@ async function saveBank(formData: FormData) {
   if (mErr) redirect("/dashboard/settings?error=mail");
   await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, action: "bank.change_requested", entity: "bank", entity_id: ctx.workspace.id, details: { by: ctx.user.id, account_last4: next.account_number?.slice(-4) ?? null } });
   redirect("/dashboard/settings?saved=bank_pending");
+}
+
+// The owner types the one-time code from the email. Only the same login, same business, within 30 minutes,
+// 5 tries per 15 minutes. The code is checked by Supabase Auth against the login email.
+async function confirmBankCode(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx) || !ctx.user.email) redirect("/dashboard/settings?error=role");
+  const code = String(formData.get("code") ?? "").replace(/\s/g, "");
+  if (!/^\d{6,10}$/.test(code)) redirect("/dashboard/settings?error=bank_code");
+  if (!(await withinLimits([{ key: `bank-code:${ctx.user.id}`, limit: 5, windowSeconds: 900 }]))) redirect("/dashboard/settings?error=bank_tries");
+  const db = supabaseAdmin();
+  const { data: r } = await db.from("bank_change_requests").select("*").eq("workspace_id", ctx.workspace.id).eq("status", "pending").gt("expires_at", new Date().toISOString()).maybeSingle();
+  if (!r || r.requested_by !== ctx.user.id) redirect("/dashboard/settings?error=bank_link");
+  const verifier = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } });
+  const { data: v, error } = await verifier.auth.verifyOtp({ email: ctx.user.email!, token: code, type: "email" });
+  if (error || v.user?.id !== ctx.user.id) redirect("/dashboard/settings?error=bank_code");
+  if (v.session) await verifier.auth.signOut({ scope: "local" }).catch(() => {}); // the check created a throwaway session; end it
+  const { data: claimed } = await db.from("bank_change_requests").update({ status: "applied", applied_at: new Date().toISOString() }).eq("id", r!.id).eq("status", "pending").select("id");
+  if (!claimed?.length) redirect("/dashboard/settings?error=bank_link");
+  await db.from("business_payment_settings").update({ bank_name: r!.bank_name, account_name: r!.account_name, account_number: r!.account_number, updated_at: new Date().toISOString() }).eq("workspace_id", ctx.workspace.id);
+  await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, action: "bank.change_confirmed", entity: "bank", entity_id: ctx.workspace.id, details: { by: ctx.user.id, via: "code", account_last4: r!.account_number?.slice(-4) ?? null } });
+  revalidatePath("/dashboard/settings");
+  redirect("/dashboard/settings?saved=bank_confirmed");
 }
 
 async function savePaystack(formData: FormData) {
@@ -133,7 +158,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const waCallback = `${serverEnv.siteUrl()}/api/webhooks/whatsapp`;
   const { data: wsRow } = await ctx.db.from("workspaces").select("business_profile").eq("id", ctx.workspace.id).single();
   const bp = (wsRow?.business_profile ?? {}) as Record<string, string | undefined>;
-  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", mode: "Your secret and public keys must both be test keys or both be live keys.", save: "Couldn't save. Try again.", mail: "We couldn't send the confirmation email. Wait a minute and try again.", noemail: "Your login has no email to confirm with.", bank_link: "That confirmation link is invalid, expired, or was opened from a different login. Save your bank details again to get a new one.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business." };
+  const errors: Record<string, string> = { role: "Only owners and admins can change payment settings.", nuban: "Account numbers in Nigeria have 10 digits.", sk: "That doesn't look like a Paystack secret key (sk_test_… or sk_live_…).", pk: "That doesn't look like a Paystack public key (pk_…).", mode: "Your secret and public keys must both be test keys or both be live keys.", save: "Couldn't save. Try again.", mail: "We couldn't send the confirmation email. Wait a minute and try again.", noemail: "Your login has no email to confirm with.", bank_link: "That confirmation link is invalid, expired, or was opened from a different login. Save your bank details again to get a new one.", wa_id: "Enter the Phone number ID from Meta (digits only).", wa_token: "Paste the WhatsApp access token from Meta.", wa_taken: "This WhatsApp number is already connected to another business.", bank_code: "That code is wrong or has expired. Check the latest email, or save your bank details again for a new code.", bank_tries: "Too many tries. Wait 15 minutes, then try again." };
 
   const psMode = s?.paystack_public_key?.startsWith("pk_live_") ? "live" : s?.paystack_public_key?.startsWith("pk_test_") ? "test" : null;
   const psStatus = !sec ? { t: "Not connected", c: "#5B6461", b: "#EEF0EE" }
@@ -142,7 +167,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
     : { t: "Test mode", c: "#1F4FD1", b: "#E6EEFF" };
   const { data: pending } = await supabaseAdmin().from("bank_change_requests").select("account_number,expires_at").eq("workspace_id", ctx.workspace.id).eq("status", "pending").gt("expires_at", new Date().toISOString()).maybeSingle();
   const bankReady = Boolean(s?.bank_name && s?.account_number && s?.account_name);
-  const savedMsg: Record<string, string> = { bank: "Saved.", bank_pending: "Check your email. We sent a confirmation link to your login email; your new bank details go live only after you click it (within 30 minutes). Until then customers keep getting your current account.", bank_confirmed: "Bank details confirmed. Your assistant uses them from the next order.", paystack: "Paystack settings saved.", whatsapp: "WhatsApp saved.", profile: "Business details saved." };
+  const savedMsg: Record<string, string> = { bank: "Saved.", bank_pending: "Check your email. We sent a one-time code to your login email: enter it below to confirm (within 30 minutes). Until then customers keep getting your current account.", bank_confirmed: "Bank details confirmed. Your assistant uses them from the next order.", paystack: "Paystack settings saved.", whatsapp: "WhatsApp saved.", profile: "Business details saved." };
 
   return (
     <>
@@ -182,6 +207,14 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <small style={{ color: "var(--ink-70)" }}>🔒 Changing your bank, account number or account name needs confirmation from your login email, so nobody can redirect your customers&apos; payments.</small>
           <div><button className="btn btn-ink">Save bank details</button></div>
         </form>
+        {pending && (
+          <form action={confirmBankCode} className="panel" style={{ borderColor: "#F0C36B" }}>
+            <h2 style={{ marginTop: 0 }}>Confirm your new bank account</h2>
+            <p style={{ fontSize: 14, color: "var(--ink-70)" }}>Enter the code we emailed to {ctx.user.email}. Your new account (••••••{pending.account_number?.slice(-4) ?? "----"}) goes live only after this.</p>
+            <label className="field"><span>Confirmation code</span><input id="code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,12}" required className="input mono" placeholder="123456" style={{ letterSpacing: ".3em", fontSize: 20 }} /></label>
+            <div><button className="btn btn-ink">Confirm bank details</button></div>
+          </form>
+        )}
 
         <form action={savePaystack} className="panel">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
