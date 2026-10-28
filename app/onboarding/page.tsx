@@ -5,7 +5,23 @@ import "../(auth)/auth.css";
 
 export const metadata = { title: "Set up your business" };
 
-const TYPES = ["Food & drinks", "Beauty & salon", "Health & clinic", "Fashion & retail", "Real estate", "Events & tickets", "Logistics", "Education & training", "Professional services", "Other"];
+// Suggestions only: owners can type any kind of business. Each maps to the closest ready-made assistant.
+const TYPES: [string, string][] = [
+  ["Restaurant & food", "food"], ["Bar, lounge & nightlife", "lounge"], ["Cakes, catering & events", "catering"],
+  ["Hotel, shortlet & hospitality", "hotel"], ["Event centre & venue", "venue"], ["Travel, tours & car hire", "travel"],
+  ["Gym & fitness", "gym"], ["Salon, spa & barbing", "salon"], ["Beauty & skincare", "beauty"],
+  ["Clinic, pharmacy & health", "clinic"], ["Fashion & clothing", "fashion"], ["Phones & gadgets", "electronics"],
+  ["Supermarket & provisions", "groceries"], ["Real estate & property", "realestate"], ["Logistics & delivery", "services"],
+  ["Education & training", "services"], ["Professional services", "services"],
+];
+const KEYWORDS: [RegExp, string][] = [
+  [/hotel|shortlet|apartment|guest ?house|resort|inn|airbnb|hospitality|lodg/i, "hotel"], [/gym|fitness|yoga|pilates|crossfit|trainer/i, "gym"],
+  [/bar|lounge|club|nightlife|pub/i, "lounge"], [/restaurant|food|kitchen|eatery|cafe|buka/i, "food"], [/cake|cater|event planner|bakery/i, "catering"],
+  [/venue|event cent|hall/i, "venue"], [/travel|tour|car hire|rental|visa|flight/i, "travel"], [/salon|spa|barb|nail|lash/i, "salon"],
+  [/skin|beauty|cosmetic|makeup/i, "beauty"], [/clinic|pharm|hospital|health|dental|lab/i, "clinic"], [/fashion|cloth|boutique|shoe|wear/i, "fashion"],
+  [/phone|gadget|electronic|laptop/i, "electronics"], [/supermarket|grocer|provision|mart/i, "groceries"], [/real estate|property|realtor/i, "realestate"],
+];
+const presetFor = (type: string) => TYPES.find(([t]) => t === type)?.[1] ?? KEYWORDS.find(([re]) => re.test(type))?.[1] ?? "general";
 
 function slugify(s: string) {
   return s.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_]+/g, "-").replace(/-+/g, "-").slice(0, 32) || "business";
@@ -15,13 +31,13 @@ async function create(formData: FormData) {
   "use server";
   const db = await supabaseUser();
   const name = String(formData.get("name") ?? "").trim();
-  const type = String(formData.get("type") ?? "Other");
+  const type = String(formData.get("type") ?? "").trim().slice(0, 60) || "Other";
   if (name.length < 2) redirect("/onboarding?error=name");
   const base = slugify(name);
   for (let i = 0; i < 5; i++) {
     const slug = i === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
     const { error } = await db.rpc("create_workspace", { p_name: name, p_slug: slug.length < 3 ? `${slug}-biz` : slug, p_type: type });
-    if (!error) redirect("/dashboard/agent?welcome=1");
+    if (!error) redirect(`/dashboard/agent?welcome=1&preset=${presetFor(type)}`);
     if (!String(error.message).includes("duplicate")) redirect("/onboarding?error=save");
   }
   redirect("/onboarding?error=save");
@@ -48,7 +64,9 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
           <form action={create}>
             <label className="field"><span>Business name</span><input id="name" name="name" className="input" required minLength={2} maxLength={80} placeholder="e.g. Mama Put Kitchen" /></label>
             <label className="field"><span>What kind of business?</span>
-              <select id="type" name="type" className="input" defaultValue="Food & drinks">{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+              <input id="type" name="type" className="input" list="business-types" required maxLength={60} placeholder="Pick one or type your own, e.g. Hotel, Gym, Car wash" autoComplete="off" />
+              <datalist id="business-types">{TYPES.map(([t]) => <option key={t} value={t} />)}</datalist>
+              <small style={{ color: "var(--ink-70)" }}>Any business works. We&apos;ll start you with the closest ready-made assistant, and you can change everything.</small>
             </label>
             <button className="btn btn-ink">Continue</button>
           </form>
