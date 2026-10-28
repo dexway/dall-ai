@@ -1,4 +1,4 @@
--- HeimCheck L4/L5: pin search_path on the bank lock trigger; logged-out visitors can't call membership checks.
+-- HeimCheck L4: pin search_path on the bank lock trigger function.
+-- (L5 left as is: is_member/is_manager are used inside RLS policies, so revoking them from anon would turn
+--  harmless empty results into permission errors. They only ever return false for logged-out visitors.)
 alter function public.lock_bank_columns() set search_path = public;
-revoke execute on function public.is_member(uuid) from anon;
-revoke execute on function public.is_manager(uuid) from anon;
