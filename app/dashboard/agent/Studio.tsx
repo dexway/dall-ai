@@ -45,8 +45,8 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
 
   return (
     <>
-      <section className="panel" ref={top} id="presets">
-        <h2>Start from a ready-made assistant</h2>
+      <section className="presets-strip" ref={top} id="presets">
+        <h2 className="strip-title">Start from a ready-made assistant</h2>
         <p style={{ color: "var(--ink-70)", fontSize: 13, marginTop: 2 }}>Pick one, fill the few <b>[blanks]</b> with your details, and save.</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           {[...builtinPresets, ...customPresets].map((p) => (
@@ -59,11 +59,11 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
         {applied && <p style={{ fontSize: 13, marginTop: 10, padding: "8px 10px", borderRadius: 8, background: blanks ? "#FBF0DC" : "#E3F5EA", color: blanks ? "#8A5A0B" : "#1E7A45" }}>Loaded <b>{applied}</b>. {blanks ? <>Fill the <b>{blanks} [bracketed] blank{blanks > 1 ? "s" : ""}</b> in Instructions with your details (anything you leave, your assistant will say the team will confirm),</> : <>All set,</>} then click <b>Save assistant</b>.</p>}
       </section>
 
-      <div className="two" style={{ marginTop: 16 }}>
-        <div style={{ display: "grid", gap: 16 }}>
-          <form action={save} className="panel">
+      <div className="studio-grid">
+        <div className="studio-col">
+          <form action={save} className="panel studio-form">
             <input type="hidden" name="id" value={agent.id} />
-            <h2>Identity</h2>
+            <h2>Identity</h2><p className="studio-sub">Who your customers are talking to.</p>
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               {avatarUrl
                 // eslint-disable-next-line @next/next/no-img-element
@@ -78,12 +78,13 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
             <label className="field"><span>Personality</span><textarea name="persona" className="input" value={persona} onChange={(e) => setPersona(e.target.value)} maxLength={600} rows={2} /><small>How it talks.</small></label>
             <label className="field"><span>First greeting</span><input name="greeting" className="input" value={greeting} onChange={(e) => setGreeting(e.target.value)} maxLength={300} /></label>
 
-            <h2 style={{ marginTop: 18 }}>Knowledge &amp; behaviour</h2>
+            <hr className="studio-rule" /><h2>Knowledge &amp; behaviour</h2><p className="studio-sub">What it knows and how it works.</p>
             <label className="field"><span>What your assistant should know and how it should work</span>
               <textarea name="instructions" className="input" value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={4000} rows={7} placeholder="Opening hours, delivery areas and times, return policy, common questions and answers, what to always ask, what never to promise…" />
               <small>This is your assistant&rsquo;s brain. The more you put here, the better it answers. It never invents prices — those come from your catalogue.</small>
             </label>
 
+            <hr className="studio-rule" /><h2>Voice &amp; style</h2>
             <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}><span>Replies in</span>
               <div className="row-actions">{LANGS.map((l) => (
                 <label key={l} className="chip" style={{ cursor: "pointer" }}><input type="checkbox" checked={langs.includes(l)} onChange={() => toggleLang(l)} /> {l}</label>
@@ -101,12 +102,13 @@ export default function Studio({ agent, avatarUrl, builtinPresets, customPresets
               <label className="field"><span>Max discount it may give (%)</span><input type="number" name="max_discount_pct" min={0} max={50} step={1} value={discount} onChange={(e) => setDiscount(e.target.value)} className="input" /><small>Above this, it passes the request to you.</small></label>
             </div>
             <input type="hidden" name="website_url" value={website} />
+            <hr className="studio-rule" />
             <label className="field"><span>Your photos for the launch kit (up to 6)</span><input type="file" name="images" accept="image/png,image/jpeg,image/webp" multiple className="input" /></label>
-            <button className="btn btn-ink">Save assistant</button>
+            <div className="studio-save"><button className="btn btn-ink">Save assistant</button><small>Changes apply from the next message.</small></div>
           </form>
         </div>
 
-        <div style={{ display: "grid", gap: 16 }}>
+        <div className="studio-col studio-side">
           <section className="panel">
             <h2>Teach it from your website</h2>
             <p style={{ color: "var(--ink-70)", fontSize: 14 }}>Paste your website link and Dall AI reads it to learn about your business. You can edit what it learns in the Knowledge box.</p>

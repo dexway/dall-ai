@@ -169,11 +169,11 @@ export default async function AgentPage({ searchParams }: { searchParams: Promis
         addKnowledgeFiles={addKnowledgeFiles} clearKnowledge={clearKnowledge}
       />
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 32 }}>
         <AgentChannels workspaceId={ctx.workspace.id} agentName={a.name} />
       </div>
 
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 32 }}>
         <LaunchKit agent={{ name: a.name, role: a.role_title, color: a.accent_color, avatar: avatarUrl, languages: a.languages }}
           business={ctx.workspace.name} slug={ctx.workspace.slug} images={images} />
       </div>
