@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseWhatsAppEvents, parseMetaEvents, eventKey, replyWindow, describeForAgent } from "../lib/channels/events.ts";
-import { postWithRetry, sendText, SendError } from "../lib/channels/send.ts";
+import { postWithRetry, sendText, sendTemplate, templateVars, SendError } from "../lib/channels/send.ts";
+import { dealTemplateParams } from "../lib/promo.ts";
 
 const wa = (value: object) => ({ object: "whatsapp_business_account", entry: [{ id: "WABA", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { phone_number_id: "PN1" }, ...value } }] }] });
 
@@ -101,4 +102,25 @@ test("send: retries once on 429/5xx, returns the platform id, and throws (never 
   const down = (async () => { n++; return new Response("x", { status: 500 }); }) as typeof fetch;
   await assert.rejects(postWithRetry("https://x", "t", {}, down, 1));
   assert.equal(n, 2);
+});
+
+test("whatsapp deal templates: counts numbered variables, fills them from the deal, sends body parameters", async () => {
+  assert.equal(templateVars("Hi there"), 0);
+  assert.equal(templateVars("{{1}}: {{2}} with code {{3}}, {{4}}"), 4);
+  assert.equal(templateVars("Hi {{first_name}}"), null);
+
+  const deal = { title: "Weekend party deal", kind: "percent" as const, value: 10, code: "JOLLOF10", ends_at: "2026-12-31T22:59:00.000Z" };
+  assert.deepEqual(dealTemplateParams(deal, 3), ["Weekend party deal", "10% off", "JOLLOF10"]);
+  assert.equal(dealTemplateParams(deal, 4)[3], "until 31 Dec");
+  assert.equal(dealTemplateParams({ ...deal, kind: "fixed", value: 200000, ends_at: null }, 4)[1], "₦2,000 off");
+  assert.equal(dealTemplateParams({ ...deal, ends_at: null }, 4)[3], "while it lasts");
+  assert.deepEqual(dealTemplateParams(deal, 0), []);
+
+  let body: Record<string, any> = {};
+  const capture = (async (_url: string, init: RequestInit) => { body = JSON.parse(String(init.body)); return new Response(JSON.stringify({ messages: [{ id: "wamid.T" }] }), { status: 200 }); }) as unknown as typeof fetch;
+  const r = await sendTemplate({ token: "t", phoneNumberId: "PN1", to: "234", name: "new_deal", language: "en", params: ["A", "B"], fetcher: capture });
+  assert.equal(r.providerMessageId, "wamid.T");
+  assert.deepEqual(body.template.components, [{ type: "body", parameters: [{ type: "text", text: "A" }, { type: "text", text: "B" }] }]);
+  await sendTemplate({ token: "t", phoneNumberId: "PN1", to: "234", name: "hello", language: "en", fetcher: capture });
+  assert.equal(body.template.components, undefined);
 });

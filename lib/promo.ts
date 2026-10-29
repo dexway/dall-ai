@@ -31,9 +31,20 @@ export function applyPromo(quote: Quote, p: Promo, now = new Date()): Quote {
   return { ...quote, discount_kobo: off, total_kobo: quote.subtotal_kobo - off };
 }
 
+/** The offer in a few words, e.g. "10% off" or "₦2,000 off". */
+export function promoOffer(p: Pick<Promo, "kind" | "value">): string {
+  return p.kind === "percent" ? `${p.value}% off` : `₦${(p.value / 100).toLocaleString("en-NG")} off`;
+}
+
+/** Values for a WhatsApp deal template, in order: {{1}} title, {{2}} offer, {{3}} code, {{4}} end date. */
+export function dealTemplateParams(p: Pick<Promo, "title" | "kind" | "value" | "code" | "ends_at">, vars: number): string[] {
+  const until = p.ends_at ? `until ${new Date(p.ends_at).toLocaleDateString("en-NG", { day: "numeric", month: "short", timeZone: "Africa/Lagos" })}` : "while it lasts";
+  return [p.title, promoOffer(p), p.code, until].slice(0, Math.max(0, Math.min(4, vars)));
+}
+
 /** How the assistant should describe a live promotion, in one line. */
 export function describePromo(p: Promo): string {
-  const amount = p.kind === "percent" ? `${p.value}% off` : `₦${(p.value / 100).toLocaleString("en-NG")} off`;
+  const amount = promoOffer(p);
   const scope = p.item_ids?.length ? " selected items" : " the order";
   const min = p.min_order_kobo ? ` on orders from ₦${(p.min_order_kobo / 100).toLocaleString("en-NG")}` : "";
   const until = p.ends_at ? `, until ${new Date(p.ends_at).toLocaleDateString("en-NG", { day: "numeric", month: "short" })}` : "";

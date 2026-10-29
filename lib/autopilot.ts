@@ -5,6 +5,7 @@ import { connectionFor } from "@/lib/channels/process";
 import { draftCalendar, draftProductionSpec } from "@/lib/creative/director";
 import { quoteBatch, authorizeBatch, submitJob } from "@/lib/creative/jobs";
 import { taskFor, chooseModel, type RoutableModel } from "@/lib/creative/router";
+import { promoOffer, dealTemplateParams } from "@/lib/promo";
 import { publishFacebook, publishInstagram, buildCaption, publishTime, PublishError, type Media } from "@/lib/social-publish";
 
 const lagosToday = () => new Date(Date.now() + 3600_000).toISOString().slice(0, 10);
@@ -28,7 +29,10 @@ export async function autoPrepare(ctx: { workspaceId: string; brandId: string; u
   return true;
 }
 
-/** New deals → broadcast to customers who opted in (Messenger/Instagram inside the 24h window). */
+/**
+ * New deals → broadcast to customers who opted in: Messenger/Instagram inside the 24h window, and
+ * WhatsApp at any time with the approved template the owner picked for the deal.
+ */
 async function announceDeals(log: string[]) {
   const db = supabaseAdmin();
   const now = new Date().toISOString();
@@ -37,13 +41,21 @@ async function announceDeals(log: string[]) {
     if (p.ends_at && p.ends_at < now) continue;
     const { data: claimed } = await db.from("promotions").update({ announced_at: now }).eq("id", p.id).is("announced_at", null).select("id");
     if (!claimed?.length) continue;
-    const off = p.kind === "percent" ? `${p.value}% off` : `₦${Math.round(Number(p.value) / 100).toLocaleString("en-NG")} off`;
-    const message = (p.announce_message || `New deal: ${p.title}. ${off} with code ${p.code}. Reply here to order!`) + "\n\nReply STOP to stop offers.";
+    const message = (p.announce_message || `New deal: ${p.title}. ${promoOffer(p)} with code ${p.code}. Reply here to order!`) + "\n\nReply STOP to stop offers.";
     for (const channel of ["facebook", "instagram"]) {
       const conn = await connectionFor(p.workspace_id, channel);
       if (!conn || conn.status !== "active") continue;
       await db.from("broadcasts").insert({ workspace_id: p.workspace_id, title: `Deal: ${p.title}`, channel, message, promo_code: p.code, status: "sending" });
       log.push(`deal ${p.code} → ${channel}`);
+    }
+    if (p.announce_template_name && p.announce_template_language) {
+      const conn = await connectionFor(p.workspace_id, "whatsapp");
+      if (!conn || conn.status !== "active") continue;
+      await db.from("broadcasts").insert({
+        workspace_id: p.workspace_id, title: `Deal: ${p.title}`, channel: "whatsapp", promo_code: p.code, status: "sending",
+        template_name: p.announce_template_name, template_language: p.announce_template_language, template_params: dealTemplateParams(p, p.announce_template_vars),
+      });
+      log.push(`deal ${p.code} → whatsapp`);
     }
   }
 }
