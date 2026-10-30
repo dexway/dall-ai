@@ -6,6 +6,7 @@ import { pollCreativeJobs } from "@/lib/creative/jobs";
 import { runAutopilot } from "@/lib/autopilot";
 import { offerLaunchVideos } from "@/lib/creative/launch-offer";
 import { importPendingSites } from "@/lib/creative/site-import";
+import { runHarveyFollowups } from "@/lib/harvey/agent";
 
 export const maxDuration = 300;
 
@@ -38,5 +39,8 @@ export async function POST(req: Request) {
   // Pull text and photos from those businesses' websites so their launch video uses real content.
   let sitesImported = 0;
   try { sitesImported = await importPendingSites(); } catch (e) { console.error("[cron] site import failed", (e as Error).message); }
-  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers, sitesImported });
+  // Harvey: draft follow-ups for deals that went quiet (the owner still sends them).
+  let harveyFollowups = 0;
+  try { harveyFollowups = await runHarveyFollowups(); } catch (e) { console.error("[cron] harvey follow-ups failed", (e as Error).message); }
+  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers, sitesImported, harveyFollowups });
 }

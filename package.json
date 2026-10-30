@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/ads.test.ts tests/net-guard.test.ts tests/creative.test.ts tests/sql.test.mjs tests/isolation.test.mjs tests/budget.test.mjs",
+    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/ads.test.ts tests/net-guard.test.ts tests/creative.test.ts tests/harvey.test.ts tests/sql.test.mjs tests/isolation.test.mjs tests/budget.test.mjs",
     "higgsfield:example": "node --env-file=.env.local --experimental-strip-types scripts/higgsfield/index.ts"
   },
   "dependencies": {
