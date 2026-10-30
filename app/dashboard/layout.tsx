@@ -28,7 +28,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <form action="/auth/signout" method="post"><button>Log out</button></form>
       </aside>
       <div className="main">{children}</div>
-      <LaunchOffer workspaceId={ctx.workspace.id} name={ctx.workspace.name} />
+      <LaunchOffer workspaceId={ctx.workspace.id} name={ctx.workspace.name} signedInAt={ctx.user.signedInAt} />
     </div>
   );
 }

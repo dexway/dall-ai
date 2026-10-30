@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { supabaseUser } from "@/lib/supabase/server";
 
 export type Ctx = {
-  user: { id: string; email: string | undefined };
+  user: { id: string; email: string | undefined; signedInAt: string | null };  // signedInAt changes on every new login
   workspace: { id: string; name: string; slug: string; business_type: string | null; status: string };
   role: "owner" | "admin" | "staff";
   db: Awaited<ReturnType<typeof supabaseUser>>;
@@ -20,7 +20,7 @@ export async function requireWorkspace(): Promise<Ctx> {
   if (!memberships?.length) redirect("/onboarding");
   const chosen = (await cookies()).get("ws")?.value;
   const m = memberships.find((x) => (x.workspaces as unknown as { id: string }).id === chosen) ?? memberships[0];
-  return { user: { id: user.id, email: user.email }, workspace: m.workspaces as unknown as Ctx["workspace"], role: m.role as Ctx["role"], db };
+  return { user: { id: user.id, email: user.email, signedInAt: user.last_sign_in_at ?? null }, workspace: m.workspaces as unknown as Ctx["workspace"], role: m.role as Ctx["role"], db };
 }
 
 export function canManage(ctx: Ctx) {
