@@ -57,3 +57,40 @@ test("harvey competition: credit lines and links count, bare mentions don't", ()
   assert.equal(detectCompetitor("<p>We are nothing like Mama Cass Catering.</p>", "https://acme.ng/", rivals), null); // bare mention
   assert.equal(detectCompetitor("<p>Catered by Ma</p>", "https://acme.ng/", [{ id: "x", name: "Ma", domain: null, aliases: [] }]), null); // too short to trust
 });
+
+test("harvey gate (port of gate.py + writer.md rules): blocks AI tells, spam words, long and linky drafts", async () => {
+  const { checkDraft } = await import("../lib/harvey/gate.ts");
+  const good = checkDraft({ channel: "email", kind: "intro", subject: "your lekki hall bookings", body: "Saw the new Ikeja branch is open. Who handles the venue for your end of year party this December?\n\nTola, Watercress" });
+  assert.deepEqual(good, { ok: true, reasons: [] });
+  const bad = checkDraft({ channel: "email", kind: "intro", subject: "Quick Question", body: "I hope this email finds you well — we offer a game-changer! Visit https://x.ng. Interested? Free?" });
+  assert.equal(bad.ok, false);
+  for (const r of ["banned phrases", "no links in a first message", "em dash", "exclamation mark", 'starts with "I"', "subject should be lowercase", "more than one question"]) assert.ok(bad.reasons.some((x) => x.startsWith(r)), r);
+  assert.ok(checkDraft({ channel: "whatsapp", kind: "intro", body: Array(70).fill("word").join(" ") }).reasons[0].startsWith("too long"));
+  assert.ok(checkDraft({ channel: "email", kind: "followup", subject: "x", body: "Hi {{first_name}}, one thing" }).reasons.some((r) => r.startsWith("unfilled placeholders")));
+});
+
+test("harvey do-not-contact (port of gate.py): addresses with plus-tags, domains on a label boundary", async () => {
+  const { dncEntry, dncMatch, dncDomainMatch } = await import("../lib/harvey/gate.ts");
+  assert.equal(dncEntry("https://www.Acme.example/about"), "acme.example");
+  assert.equal(dncEntry("mailto:Jane@acme.example"), "jane@acme.example");
+  assert.equal(dncEntry("*.acme.example"), "acme.example");
+  assert.equal(dncEntry("not a domain"), "");
+  const list = ["acme.example", "jane@other.example"];
+  assert.equal(dncMatch("bob@mail.acme.example", list), "acme.example");
+  assert.equal(dncMatch("bob@notacme.example", list), "");
+  assert.equal(dncMatch("jane+news@other.example", list), "jane@other.example");
+  assert.equal(dncMatch("john@other.example", list), "");
+  assert.equal(dncDomainMatch("other.example", list), ""); // one address doesn't bar the company
+  assert.equal(dncDomainMatch("www.acme.example", list), "acme.example");
+});
+
+test("harvey skills: Harvey's prompts and skills load per agent, placeholders filled", async () => {
+  const { HARVEY_PROMPTS, HARVEY_SKILLS, skillsFor, fill } = await import("../lib/harvey/harvey-skills.ts");
+  assert.ok(HARVEY_PROMPTS.writer.includes("NEVER use em dashes"));
+  assert.ok(HARVEY_SKILLS.objection_handling.length > 1000);
+  const w = skillsFor("writer");
+  assert.ok(w.startsWith("\n\n---\n## FOUNDATIONAL KNOWLEDGE") && w.includes(HARVEY_SKILLS.email_frameworks.slice(0, 40)) && !w.includes(HARVEY_SKILLS.objection_handling.slice(0, 40)));
+  const sys = fill(HARVEY_PROMPTS.system, { company_name: "Watercress", product_description: "Event halls" });
+  assert.ok(sys.includes("autonomous AI sales agent at Watercress") && sys.includes("Your product: Event halls") && !/\{\{\s*company_name/.test(sys));
+  assert.ok(fill("Hi {{first_name}} at {{unknown}}", {}).startsWith("Hi {{first_name}} at "));
+});
