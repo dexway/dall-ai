@@ -1,0 +1,29 @@
+.hv-badge { display: inline-block; vertical-align: middle; margin-left: 8px; padding: 3px 10px; border-radius: 99px; background: var(--lime); color: var(--ink); font: 600 12px/1.4 var(--f-body); }
+.hv-form { display: grid; gap: 10px; }
+.hv-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.hv-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.hv-toolbar h2 { margin: 0; }
+.hv-stages { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.hv-stages small { opacity: .7; margin-left: 2px; }
+tr.hv-sel td { background: rgba(200, 238, 114, .18); }
+.hv-stage { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; background: var(--ink-12); color: var(--ink); white-space: nowrap; }
+.hv-stage.st-contacted, .hv-stage.st-drafted { background: #e7eef9; color: #234a7a; }
+.hv-stage.st-replied, .hv-stage.st-meeting { background: #fbf0dc; color: #8a5a0b; }
+.hv-stage.st-proposal { background: #efe4f7; color: #5d2f86; }
+.hv-stage.st-won { background: var(--lime); color: var(--ink); }
+.hv-stage.st-lost { background: #f4e0da; color: var(--bad); }
+.hv-cols { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 12px; }
+.hv-signals { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.hv-signals li { padding: 8px 10px; border-left: 3px solid var(--lime); background: rgba(200, 238, 114, .1); border-radius: 0 8px 8px 0; }
+.hv-drafts { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.hv-draft { border: 1px solid var(--ink-12); border-radius: var(--r-md); padding: 12px 14px; background: var(--white); display: grid; gap: 6px; }
+.hv-draft header { font-size: 13px; text-transform: capitalize; }
+.hv-body { white-space: pre-wrap; margin: 0; font-size: 14px; line-height: 1.5; }
+.hv-thread { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.hv-thread li { padding: 10px 12px; border-radius: var(--r-md); display: grid; gap: 4px; max-width: 760px; }
+.hv-thread li.out { background: rgba(200, 238, 114, .14); margin-left: auto; }
+.hv-thread li.in { background: var(--white); border: 1px solid var(--ink-12); }
+/* Shared helpers (same as the Content Creator's), so this page doesn't depend on its stylesheet. */
+.hv-page .row, .hv-deal .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hv-page .hyp, .hv-deal .hyp { font-size: 12px; color: #8A5A0B; }
+.hv-page .muted, .hv-deal .muted { color: var(--ink-70); }
