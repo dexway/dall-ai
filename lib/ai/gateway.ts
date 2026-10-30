@@ -10,7 +10,7 @@ import { creditsFor, limitCodeFrom, limitMessage, reservationFor, usdCost, type 
 export type GatewayRequest = {
   workspaceId: string;
   feature: "chat" | "receipt_check" | "launch_kit" | "agent_test" | "followup" | "marketing_copy"
-    | "creative_research" | "creative_strategy" | "creative_calendar" | "creative_spec";
+    | "creative_research" | "creative_strategy" | "creative_calendar" | "creative_spec" | "creative_motion";
   agentId?: string | null;
   userId?: string | null;
   conversationId?: string | null;
@@ -22,7 +22,7 @@ export type GatewayRequest = {
 };
 
 // Creative Director work (research, strategy, calendars) needs longer answers than a chat reply.
-const LONG_FEATURES = new Set(["creative_research", "creative_strategy", "creative_calendar", "creative_spec"]);
+const LONG_FEATURES = new Set(["creative_research", "creative_strategy", "creative_calendar", "creative_spec", "creative_motion"]);
 const WEB_SEARCH_USD = 0.01; // Anthropic web search: $10 per 1,000 searches
 
 // USD cost of each completed call (tokens + server-side web searches), for spend caps and ledgers.

@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { runDueFollowups, sendBroadcast } from "@/lib/marketing";
 import { pollCreativeJobs } from "@/lib/creative/jobs";
 import { runAutopilot } from "@/lib/autopilot";
+import { offerLaunchVideos } from "@/lib/creative/launch-offer";
 
 export const maxDuration = 300;
 
@@ -30,5 +31,8 @@ export async function POST(req: Request) {
   const creative = await pollCreativeJobs(15_000);
   // Autopilot: announce new deals, publish due posts, generate within the owner's cap, plan next month.
   const autopilot = await runAutopilot(120_000);
-  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot });
+  // Businesses that just added their website get a launch video draft and a dashboard pop-up.
+  let launchOffers = 0;
+  try { launchOffers = await offerLaunchVideos(); } catch (e) { console.error("[cron] launch offers failed", (e as Error).message); }
+  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers });
 }

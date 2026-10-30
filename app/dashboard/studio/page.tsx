@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { BrandProfile, missingBrief, ResearchReport, Strategy, type Idea } from "@/lib/creative/schemas";
 import { estimateCost, type ModelRow } from "@/lib/creative/rules";
 import { generationConfigured } from "@/lib/creative/jobs";
+import { MotionBrief, MotionPack, prefillMotionBrief, motionQuestions, GOALS, MOTION_PLATFORMS } from "@/lib/creative/motion";
 import * as A from "./actions";
 import StudioDemo from "./StudioDemo";
 import "./studio.css";
@@ -11,12 +12,12 @@ import "./studio.css";
 export const metadata = { title: "Content Creator" };
 export const maxDuration = 300;
 
-const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["autopilot", "Autopilot"], ["usage", "Usage"]] as const;
+const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["motion", "Motion video"], ["autopilot", "Autopilot"], ["usage", "Usage"]] as const;
 const OBJECTIVES = ["awareness", "engagement", "leads", "bookings", "sales", "retention", "other"];
 const PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "whatsapp"];
 const STATUS_LABEL: Record<string, string> = { draft: "Draft", awaiting_approval: "Awaiting approval", approved: "Approved", rejected: "Rejected", revision_requested: "Revision requested", generation_queued: "Generation queued", generating: "Generating", generated: "Ready for review", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
 const ERR: Record<string, string> = { role: "Only owners and admins can change the Creative Director.", brand: "Pick or create a brand first.", brief: "Check the brief", asset: "Brand files must be PNG, JPG, WEBP or PDF under 4 MB.", account: "Add at least one account.", running: "Research is already running for this brand.", ai: "The Creative Director couldn't finish that", state: "That step isn't available right now", locked: "Approved items are locked. Request a revision to change them.", model: "Pick a model an admin has enabled.", confirm: "Tick the box to confirm the spend.", quota: "Generation blocked" };
-const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
+const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", motion: "Brief saved.", motion_drafting: "Your motion director is reviewing your photos and writing the storyboard. It takes 1–2 minutes; refresh to see it.", motion_approved: "Production pack approved.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
 
 function Chip({ s }: { s: string }) { return <span className={`chip st-${s}`}>{STATUS_LABEL[s] ?? s.replace(/_/g, " ")}</span>; }
 function Sources({ urls, map }: { urls: string[]; map: Map<string, string> }) {
@@ -332,6 +333,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
       {tab === "production" && <Production B={B} ws={ws} models={(models ?? []) as ModelRow[]} sp={sp} />}
       {tab === "usage" && <Usage ws={ws} B={B} userId={ctx.user.id} />}
       {tab === "autopilot" && <Autopilot B={B} ws={ws} />}
+      {tab === "motion" && <Motion B={B} ws={ws} name={full?.name ?? brand.name} profile={profile} assets={(full?.asset_paths ?? []) as string[]} sp={sp} />}
     </>
   );
 }
@@ -462,6 +464,96 @@ async function Autopilot({ B, ws }: { B: string; ws: string }) {
         <table className="table"><thead><tr><th>Date</th><th>Where</th><th>Post</th><th>Status</th></tr></thead><tbody>
           {posts.map((p) => <tr key={p.id}><td>{p.planned_date}</td><td>{p.platform}</td><td>{(p.idea as { hook?: string })?.hook}</td><td><Chip s={p.publish_status === "published" ? "completed" : p.publish_status === "failed" ? "failed" : "queued"} /> {p.publish_status}{p.publish_error ? <><br /><small>{p.publish_error}</small></> : null}</td></tr>)}
         </tbody></table>)}
+    </section>
+  );
+}
+
+const BEAT: Record<string, string> = { hook: "Hook", problem: "Desire", space: "The space", payoff: "Payoff", cta: "Call to action" };
+
+async function Motion({ B, ws, name, profile, assets, sp }: { B: string; ws: string; name: string; profile: BrandProfile; assets: string[]; sp: Record<string, string | undefined> }) {
+  const db = supabaseAdmin();
+  const { data: projects } = await db.from("motion_projects").select("*").eq("brand_id", B).eq("workspace_id", ws).order("created_at", { ascending: false }).limit(5);
+  const proj = (projects ?? []).find((p) => p.id === sp.m) ?? (projects ?? [])[0];
+  const brief = prefillMotionBrief(profile, proj ? MotionBrief.partial().parse(proj.brief ?? {}) : null, name);
+  const photos = assets.filter((p) => /\.(png|jpe?g|webp)$/i.test(p));
+  const questions = motionQuestions(brief, photos.length);
+  const pack = proj?.pack ? MotionPack.safeParse(proj.pack) : null;
+  const p = pack?.success ? pack.data : null;
+  const thumbs = new Map<string, string>();
+  if (p) {
+    const { data: signed } = await db.storage.from("creative-assets").createSignedUrls(proj!.photos ?? [], 3600);
+    (signed ?? []).forEach((x, i) => { if (x.signedUrl) thumbs.set(proj!.photos[i], x.signedUrl); });
+  }
+  const fname = (path: string) => path.split("/").pop()?.replace(/^\d+-/, "") ?? path;
+  return (
+    <section className="panel">
+      <h2>Motion video</h2>
+      <p className="muted">Your motion director builds launch videos in motion graphics from your logo, colours and real photos, or a video of your space from your own photos. It writes a scene-by-scene storyboard, the animation for every scene and the prompts to make it. Nothing is generated or charged here: you approve the plan first.</p>
+      {questions.length > 0 && <div className="notice"><b>A few details make the video much better:</b><ul>{questions.map((q) => <li key={q}>{q}</li>)}</ul>{photos.length < 3 && <Link href={`/dashboard/studio?b=${B}&tab=brief&step=2`}>Upload photos →</Link>}</div>}
+      <form action={A.saveMotionBrief} className="cd-form">
+        <input type="hidden" name="b" value={B} />{proj && <input type="hidden" name="project" value={proj.id} />}
+        <fieldset className="checks"><legend>Video type</legend>
+          <label><input type="radio" name="kind" value="launch" defaultChecked={brief.kind === "launch"} /> <b>Launch video</b> · motion graphics announcing something new</label>
+          <label><input type="radio" name="kind" value="space" defaultChecked={brief.kind === "space"} /> <b>Space video</b> · your real venue or property, beautifully shot</label>
+        </fieldset>
+        <label className="field"><span>What are you launching? (launch videos)</span><input name="launch_what" className="input" defaultValue={brief.launch_what} placeholder="Our new Ikeja branch, the Friday brunch menu, home delivery…" /></label>
+        <div className="grid3">
+          <label className="field"><span>Launch date</span><input name="launch_date" className="input" defaultValue={brief.launch_date} placeholder="Sat 6 Dec" /></label>
+          <label className="field"><span>Launch offer</span><input name="offer" className="input" defaultValue={brief.offer} placeholder="20% off opening weekend" /></label>
+          <label className="field"><span>Brand colours</span><input name="brand_colors" className="input" defaultValue={brief.brand_colors} placeholder="#0B3D2E, #F2B705 (or leave empty)" /></label>
+        </div>
+        <div className="grid3">
+          <label className="field"><span>Business, product or venue name</span><input name="space_name" className="input" defaultValue={brief.space_name} /></label>
+          <label className="field"><span>What kind of business</span><input name="business_type" className="input" defaultValue={brief.business_type} placeholder="restaurant, salon, fashion label, short-let…" /></label>
+          <label className="field"><span>Price position</span><select name="price_position" className="input" defaultValue={brief.price_position}>{["budget", "mid", "premium", "luxury"].map((x) => <option key={x}>{x}</option>)}</select></label>
+        </div>
+        <div className="grid3">
+          <label className="field"><span>Goal</span><select name="goal" className="input" defaultValue={brief.goal}>{Object.entries(GOALS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+          <label className="field"><span>Where it will run</span><select name="platform" className="input" defaultValue={brief.platform}>{Object.entries(MOTION_PLATFORMS).map(([k, v]) => <option key={k} value={k}>{v.label} ({v.aspect})</option>)}</select></label>
+          <label className="field"><span>Length</span><select name="duration" className="input" defaultValue={String(brief.duration)}><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label>
+        </div>
+        <label className="field"><span>Who should it bring in?</span><textarea name="audience" rows={2} className="input" defaultValue={brief.audience} /></label>
+        <label className="field"><span>The one thing viewers should remember</span><input name="one_message" className="input" defaultValue={brief.one_message} placeholder="The calmest sunset view in Lekki, 5 minutes from the expressway" /></label>
+        <div className="grid3">
+          <label className="field"><span>Opening shot (hook)</span><input name="hook" className="input" defaultValue={brief.hook} placeholder="Leave empty and we'll pick" /></label>
+          <label className="field"><span>What customers want</span><input name="desire" className="input" defaultValue={brief.desire} /></label>
+          <label className="field"><span>How it feels to be there</span><input name="payoff" className="input" defaultValue={brief.payoff} /></label>
+        </div>
+        <label className="field"><span>Real features it must show</span><textarea name="must_show" rows={2} className="input" defaultValue={brief.must_show} /></label>
+        <label className="field"><span>Must not change (signage, colours, layout…)</span><input name="must_not_change" className="input" defaultValue={brief.must_not_change} /></label>
+        <div className="grid3">
+          <label className="field"><span>Call to action</span><input name="cta" className="input" defaultValue={brief.cta} /></label>
+          <label className="field"><span>Tone</span><input name="tone" className="input" defaultValue={brief.tone} /></label>
+        </div>
+        <label className="row"><input type="checkbox" name="allow_clutter_removal" defaultChecked={brief.allow_clutter_removal} /> Remove temporary clutter (cables, bins, boxes) from my photos</label>
+        <label className="row"><input type="checkbox" name="allow_staging" defaultChecked={brief.allow_staging} /> Show staging or decor ideas, clearly labelled as concepts</label>
+        <label className="field"><span>Your script (optional)</span><textarea name="script" rows={4} className="input" defaultValue={brief.script} placeholder="Paste voiceover or on-screen lines. Leave empty and we'll draft one for you to edit." /></label>
+        <div className="row"><button className="btn btn-line" name="draft" value="0">Save brief</button><button className="btn btn-lime" name="draft" value="1" disabled={!photos.length || proj?.status === "drafting"}>Save and write storyboard</button></div>
+      </form>
+
+      {proj && <p className="muted">Status: <Chip s={proj.status === "ready" ? "awaiting_approval" : proj.status === "drafting" ? "generating" : proj.status} />{proj.error ? ` ${proj.error}` : ""}</p>}
+      {proj?.pack && !p && <p className="muted">This plan was saved in an older format. Write the storyboard again.</p>}
+      {p && <>
+        <h3>{p.storyboard.title} <small className="muted">· {p.storyboard.duration}s · {p.storyboard.aspect_ratio}{p.provisional ? " · provisional script" : ""}</small></h3>
+        <p className="hyp">Plan only: these images and scenes haven&apos;t been generated yet.</p>
+        {p.needs_from_owner.length > 0 && <div className="notice"><b>Needed from you</b><ul>{p.needs_from_owner.map((n) => <li key={n}>{n}</li>)}</ul></div>}
+        <h3>Your photos and files</h3>
+        <div className="table-wrap"><table><thead><tr><th>Photo</th><th>Area</th><th>Use</th><th>Review</th></tr></thead><tbody>
+          {p.assets.map((a) => <tr key={a.path}><td>{thumbs.get(a.path) ? <img src={thumbs.get(a.path)} alt={fname(a.path)} width={96} style={{ borderRadius: 6 }} /> : fname(a.path)}</td><td>{a.area}</td><td><b>{a.role}</b>{a.use_for ? <><br /><small>{a.use_for}</small></> : null}</td><td><small>{a.assessment}</small></td></tr>)}
+        </tbody></table></div>
+        <h3>Planned edits</h3>
+        <ol>{p.enhancements.map((e) => <li key={e.source_path + e.rank}><b>{fname(e.source_path)}</b>{e.concept && <span className="hyp"> Visual concept, not the current space</span>}: {e.direction}<br /><small>Crops: {e.crops.join(", ") || "as shot"} · Keep: {e.keep_unchanged || "everything real"}</small><details><summary>Prompt</summary><p><small>{e.prompt}</small></p>{e.negative && <p><small>Avoid: {e.negative}</small></p>}</details></li>)}</ol>
+        <h3>Storyboard</h3>
+        <div className="table-wrap"><table><thead><tr><th>Time</th><th>Beat</th><th>Shot</th><th>Words</th><th>Camera &amp; sound</th></tr></thead><tbody>
+          {p.storyboard.scenes.map((sc, i) => <tr key={i}>
+            <td className="num">{sc.start}–{sc.end}s</td><td><b>{BEAT[sc.beat]}</b><br /><small>{sc.visual_objective}</small></td>
+            <td>{sc.source_photo && thumbs.get(sc.source_photo) ? <img src={thumbs.get(sc.source_photo)} alt="" width={80} style={{ borderRadius: 6 }} /> : <small className="hyp">No photo yet</small>}<br /><small>{sc.shot}</small><details><summary>Prompt</summary><p><small>{sc.prompt}</small></p>{sc.negative && <p><small>Avoid: {sc.negative}</small></p>}</details></td>
+            <td>{sc.voiceover && <><small>VO: {sc.voiceover}</small><br /></>}{sc.on_screen_text && <small>Text: {sc.on_screen_text}</small>}</td>
+            <td>{sc.motion && <details><summary>Animation</summary><p><small>{sc.motion}</small></p></details>}<small>{sc.camera}{sc.transition ? ` · ${sc.transition}` : ""}{sc.sound ? ` · ${sc.sound}` : ""}</small></td></tr>)}
+        </tbody></table></div>
+        {p.cutdowns.length > 0 && <p className="muted">Cutdowns: {p.cutdowns.map((c) => `${c.platform} ${c.aspect_ratio}`).join(" · ")}</p>}
+        {proj!.status === "ready" && <form action={A.approveMotionPack}><input type="hidden" name="b" value={B} /><input type="hidden" name="project" value={proj!.id} /><button className="btn btn-ink">Approve this plan</button></form>}
+      </>}
     </section>
   );
 }

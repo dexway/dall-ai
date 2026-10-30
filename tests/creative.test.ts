@@ -169,3 +169,32 @@ test("social: instagram container → wait → publish; facebook photo post; cap
   const denied = (async () => new Response(JSON.stringify({ error: { message: "(#200) Requires pages_manage_posts" } }), { status: 403 })) as typeof fetch;
   await assert.rejects(publishFacebook({ pageId: "PG", token: "t", caption: "x", media: { url: "u", kind: "image" }, fetcher: denied }), /reconnect via Meta/);
 });
+
+test("motion video: brief prefills from the profile, asks for what's missing, and the pack only uses real photos", async () => {
+  const { prefillMotionBrief, motionQuestions, motionRequest, enforcePack, MotionPack, MOTION_SKILL } = await import("../lib/creative/motion.ts");
+  const b = prefillMotionBrief({ industry: "rooftop lounge", audience: "young professionals", objectives: ["bookings"], location: "Lekki", offers: "table booking" }, { one_message: "Sunsets above Lekki" }, "Skyline");
+  assert.equal(b.business_type, "rooftop lounge"); assert.equal(b.goal, "bookings"); assert.equal(b.one_message, "Sunsets above Lekki"); assert.equal(b.duration, 15);
+  assert.equal(b.kind, "launch");
+  const lq = motionQuestions(b, 0);
+  assert.ok(lq.some((x) => x.includes("logo")) && lq.some((x) => x.includes("launching")));
+  const q = motionQuestions({ ...b, kind: "space" }, 1);
+  assert.ok(q[0].includes("at least 3 photos")); assert.ok(q.some((x) => x.includes("features")));
+  assert.ok(!/sanji|higgsfield\.ai\/@/i.test(MOTION_SKILL));
+  const req = motionRequest({ name: "Skyline", brief: { ...b, launch_what: "Friday brunch" }, profile: {}, photos: ["ws/b/brand/1-roof.jpg"] });
+  assert.ok(req.includes("1. ws/b/brand/1-roof.jpg") && req.includes("15 seconds") && req.includes("LAUNCH VIDEO in motion graphics. Launching: Friday brunch"));
+  assert.ok(MOTION_SKILL.includes("Kinetic typography"));
+
+  const scene = (beat: string, start: number, end: number, photo: string) => ({ beat, start, end, visual_objective: "o", shot: "s", camera: "slow dolly-in", prompt: "p", source_photo: photo });
+  const pack = MotionPack.parse({
+    assets: [{ path: "ws/b/brand/1-roof.jpg", role: "hero", assessment: "great light" }, { path: "stock/fake.jpg", role: "hero", assessment: "x" }],
+    enhancements: [{ source_path: "stock/fake.jpg", direction: "d", prompt: "p", rank: 1 }, { source_path: "ws/b/brand/1-roof.jpg", direction: "warm grade", prompt: "p", rank: 2 }],
+    storyboard: { title: "t", duration: 20, aspect_ratio: "9:16", scenes: [scene("cta", 12, 20, "ws/b/brand/1-roof.jpg"), scene("hook", 0, 4, "ws/b/brand/1-roof.jpg"), scene("space", 4, 12, "invented.jpg")] },
+  });
+  const launch = enforcePack(pack, ["ws/b/brand/1-roof.jpg"], 15, "launch");
+  assert.ok(!launch.needs_from_owner.some((n) => n.includes("no matching photo"))); // graphics-only scenes are fine in a launch video
+  const out = enforcePack(pack, ["ws/b/brand/1-roof.jpg"], 15, "space");
+  assert.equal(out.assets.length, 1); assert.equal(out.enhancements.length, 1);
+  assert.deepEqual(out.storyboard.scenes.map((s) => s.beat), ["hook", "space", "cta"]);
+  assert.equal(out.storyboard.scenes[1].source_photo, ""); assert.equal(out.storyboard.scenes[2].end, 15); assert.equal(out.storyboard.duration, 15);
+  assert.ok(out.needs_from_owner.some((n) => n.includes("no matching photo")));
+});

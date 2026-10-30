@@ -8,7 +8,8 @@ import { BrandProfile } from "@/lib/creative/schemas";
 import { canMoveItem } from "@/lib/creative/rules";
 import { QuotaError } from "@/lib/creative/budget";
 import { taskFor, chooseModel, type RoutableModel } from "@/lib/creative/router";
-import { runResearch, suggestAccounts, draftStrategy, draftCalendar, regenerateItem, draftProductionSpec } from "@/lib/creative/director";
+import { runResearch, suggestAccounts, draftStrategy, draftCalendar, regenerateItem, draftProductionSpec, draftMotionPack } from "@/lib/creative/director";
+import { MotionBrief } from "@/lib/creative/motion";
 import { authorizeBatch, submitJob } from "@/lib/creative/jobs";
 import { GatewayError } from "@/lib/ai/gateway";
 
@@ -273,4 +274,43 @@ export async function saveAutopilot(formData: FormData) {
   await log(ctx.workspace.id, "generation", brand!.id, "edit", ctx.user.id, "Autopilot settings changed", { auto_plan: on("auto_plan"), auto_generate: on("auto_generate"), auto_publish: on("auto_publish"), cap, channels });
   revalidatePath("/dashboard/studio");
   go(brand!.id, "autopilot", "saved=autopilot");
+}
+
+/** Saves the owner's motion video brief and, if asked, drafts the production pack in the background. */
+export async function saveMotionBrief(formData: FormData) {
+  const { brand, ctx, d } = await own(formData);
+  if (!brand) go(null, "motion", "error=brand");
+  const s = (k: string) => String(formData.get(k) ?? "");
+  const parsed = MotionBrief.safeParse({
+    kind: s("kind") === "space" ? "space" : "launch", launch_what: s("launch_what"), launch_date: s("launch_date"), offer: s("offer"), brand_colors: s("brand_colors"),
+    space_name: s("space_name"), business_type: s("business_type"), goal: s("goal"), audience: s("audience"), one_message: s("one_message"),
+    price_position: s("price_position"), hook: s("hook"), desire: s("desire"), payoff: s("payoff"), must_show: s("must_show"),
+    must_not_change: s("must_not_change"), cta: s("cta"), platform: s("platform"), duration: Number(s("duration")) === 30 ? 30 : 15,
+    tone: s("tone"), allow_clutter_removal: formData.get("allow_clutter_removal") === "on", allow_staging: formData.get("allow_staging") === "on", script: s("script"),
+  });
+  if (!parsed.success) go(brand!.id, "motion", `error=brief&why=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Check the fields")}`);
+  const db = supabaseAdmin();
+  const id = s("project");
+  const { data: cur } = id ? await db.from("motion_projects").select("id,status,version").eq("id", id).eq("brand_id", brand!.id).maybeSingle() : { data: null };
+  if (cur?.status === "drafting") go(brand!.id, "motion", "error=running");
+  let projectId = cur?.id as string | undefined;
+  if (cur) await db.from("motion_projects").update({ brief: parsed.data, version: cur.version + 1, status: "draft", updated_at: new Date().toISOString() }).eq("id", cur.id);
+  else projectId = (await db.from("motion_projects").insert({ workspace_id: ctx.workspace.id, brand_id: brand!.id, brief: parsed.data, created_by: ctx.user.id }).select("id").single()).data!.id;
+  if (formData.get("draft") === "1") {
+    await db.from("motion_projects").update({ status: "drafting" }).eq("id", projectId!);
+    after(() => draftMotionPack(d, projectId!));
+  }
+  revalidatePath("/dashboard/studio");
+  go(brand!.id, "motion", `m=${projectId}&saved=${formData.get("draft") === "1" ? "motion_drafting" : "motion"}`);
+}
+
+export async function approveMotionPack(formData: FormData) {
+  const { brand, ctx } = await own(formData);
+  if (!brand) go(null, "motion", "error=brand");
+  const id = String(formData.get("project") ?? "");
+  const { data } = await supabaseAdmin().from("motion_projects").update({ status: "approved", approved_by: ctx.user.id, approved_at: new Date().toISOString() })
+    .eq("id", id).eq("brand_id", brand!.id).eq("status", "ready").select("id");
+  if (!data?.length) go(brand!.id, "motion", `m=${id}&error=state`);
+  revalidatePath("/dashboard/studio");
+  go(brand!.id, "motion", `m=${id}&saved=motion_approved`);
 }

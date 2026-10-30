@@ -9,6 +9,7 @@ import {
   enforceSources, normalizeUrl, parseJson,
 } from "@/lib/creative/schemas";
 import { EDITABLE_BY_AI } from "@/lib/creative/rules";
+import { MOTION_SKILL, MOTION_PACK_SCHEMA, MotionBrief, MotionPack, motionRequest, enforcePack } from "@/lib/creative/motion";
 import type { z } from "zod";
 
 // Model choice per task: strategic work on the stronger model, reformatting on the cheaper one.
@@ -256,4 +257,39 @@ Write a precise production spec: one strong prompt (subject, setting, light, cam
   if (spec.output !== model.kind) spec.output = model.kind;
   spec.reference_asset_paths = spec.reference_asset_paths.filter((p) => (brand.asset_paths as string[]).includes(p));
   return spec;
+}
+
+const PHOTO = /\.(png|jpe?g|webp)$/i;
+const MAX_MOTION_PHOTOS = 10;
+
+/**
+ * Drafts a motion video production pack from the brand's own photos and the owner's brief. Claude sees
+ * the real photos (signed for 10 minutes), reviews them, plans enhancements and writes the storyboard
+ * and Higgsfield prompts. Nothing is generated here.
+ */
+export async function draftMotionPack(ctx: Ctx, projectId: string): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: proj } = await db.from("motion_projects").select("*").eq("id", projectId).eq("brand_id", ctx.brandId).single();
+  if (!proj) throw new Error("Motion project not found.");
+  await db.from("motion_projects").update({ status: "drafting", error: null, updated_at: new Date().toISOString() }).eq("id", projectId);
+  try {
+    const { brand, profile } = await brandContext(ctx.brandId);
+    const brief = MotionBrief.parse(proj.brief ?? {});
+    const photos = (brand.asset_paths as string[]).filter((p) => PHOTO.test(p)).slice(-MAX_MOTION_PHOTOS);
+    if (!photos.length) throw new Error("Upload your logo and photos first (Brief → Brand files).");
+    const { data: signed } = await db.storage.from("creative-assets").createSignedUrls(photos, 600);
+    const images: Anthropic.ContentBlockParam[] = (signed ?? []).flatMap((s, i) => s.signedUrl
+      ? [{ type: "text", text: `Photo ${i + 1}: ${photos[i]}` } as const, { type: "image", source: { type: "url", url: s.signedUrl } } as Anthropic.ImageBlockParam]
+      : []);
+    const msg = await directorCall(ctx, {
+      feature: "creative_motion", model: STRATEGY_MODEL(), maxTokens: 8000, system: MOTION_SKILL,
+      messages: [{ role: "user", content: [...images, { type: "text", text: motionRequest({ name: brand.name, brief, profile, photos }) }] }],
+    }, 0.8);
+    const pack = enforcePack(await validated(ctx, MotionPack, textOf(msg), MOTION_PACK_SCHEMA), photos, brief.duration, brief.kind);
+    if (brief.script) pack.provisional = false;
+    await db.from("motion_projects").update({ status: "ready", pack, photos, updated_at: new Date().toISOString() }).eq("id", projectId);
+  } catch (e) {
+    const m = e instanceof QuotaError || e instanceof GatewayError ? e.message : (e as Error).message;
+    await db.from("motion_projects").update({ status: "failed", error: m.slice(0, 400), updated_at: new Date().toISOString() }).eq("id", projectId);
+  }
 }
