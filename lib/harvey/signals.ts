@@ -106,3 +106,28 @@ export function followupDue(p: { stage: string; updated_at: string }, lastOut: s
   if (lastIn && Date.parse(lastIn) > Date.parse(lastOut)) return false;
   return now - Date.parse(lastOut) >= days * 86_400_000;
 }
+
+export type CompetitorRef = { id: string; name: string; domain: string | null; aliases: string[] };
+const CREDIT = "(?:powered by|website by|site by|designed by|managed by|built by|developed by|hosted by|catered by|catering by|supplied by|serviced by|maintained by|in partnership with|official (?:partner|supplier|caterer|venue)|partners?:?|our partners|trusted partner)";
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Which competitor this prospect appears to use today, from its own page. Counts only a link to the
+ * competitor's site or a credit line naming them ("powered by", "catered by", "our partners"…); a bare
+ * mention isn't recorded, because a wrong incumbent in an email is worse than none.
+ */
+export function detectCompetitor(html: string, url: string, competitors: CompetitorRef[]): { competitorId: string; signal: Signal } | null {
+  const t = text(html);
+  for (const c of competitors) {
+    if (c.domain && new RegExp(`href=["'][^"']*\\b${esc(c.domain)}\\b`, "i").test(html)) {
+      const anchor = html.match(new RegExp(`<a[^>]+${esc(c.domain)}[^>]*>([\\s\\S]{0,120}?)</a>`, "i"))?.[1];
+      const label = anchor ? text(anchor) : c.domain;
+      return { competitorId: c.id, signal: { key: "USES_COMPETITOR", label: `Works with ${c.name}`, evidence: `Links to ${c.domain}${label && label !== c.domain ? ` ("${label.slice(0, 80)}")` : ""}`, url } };
+    }
+    for (const n of [c.name, ...c.aliases].filter((x) => x && x.trim().length >= 3)) {
+      const m = t.match(new RegExp(`${CREDIT}\\s*[:\\-–]?\\s*(?:the\\s+)?${esc(n.trim())}\\b`, "i"));
+      if (m) return { competitorId: c.id, signal: { key: "USES_COMPETITOR", label: `Works with ${c.name}`, evidence: snippet(t, m.index ?? 0), url } };
+    }
+  }
+  return null;
+}

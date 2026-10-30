@@ -27,3 +27,10 @@ tr.hv-sel td { background: rgba(200, 238, 114, .18); }
 .hv-page .row, .hv-deal .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .hv-page .hyp, .hv-deal .hyp { font-size: 12px; color: #8A5A0B; }
 .hv-page .muted, .hv-deal .muted { color: var(--ink-70); }
+.hv-rivals { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.hv-rival { border: 1px solid var(--ink-12); border-radius: var(--r-md); padding: 12px 14px; background: var(--white); display: grid; gap: 6px; align-content: start; }
+.hv-rival header { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.hv-rival header .hv-stage { margin-left: auto; }
+.hv-rival p { margin: 0; }
+.hv-weak { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
+.hv-uses { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 99px; background: rgba(215, 122, 92, .16); color: #9a4a30; font-size: 11.5px; font-weight: 600; }

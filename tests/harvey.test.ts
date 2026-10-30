@@ -1,7 +1,7 @@
 // Harvey's pure parts: signals with evidence, contacts, one-tap send links, follow-up timing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectSignals, extractContacts, mergeSignals, profileLinks, domainOf, mailtoLink, whatsappLink, followupDue } from "../lib/harvey/signals.ts";
+import { detectSignals, extractContacts, mergeSignals, profileLinks, domainOf, mailtoLink, whatsappLink, followupDue, detectCompetitor } from "../lib/harvey/signals.ts";
 
 const page = `<html><head><script async src="https://connect.facebook.net/en_US/fbevents.js"></script><script>fbq('init','123')</script></head><body>
   <h1>Bluewater Logistics</h1><p>We're hiring drivers and dispatch officers across Lagos.</p>
@@ -44,4 +44,16 @@ test("harvey helpers: links, domains, send links, follow-up timing", () => {
   assert.equal(followupDue(p, new Date(now - 2 * day).toISOString(), null, 3, now), false);
   assert.equal(followupDue(p, new Date(now - 4 * day).toISOString(), new Date(now - day).toISOString(), 3, now), false); // they replied
   assert.equal(followupDue({ ...p, stage: "replied" }, new Date(now - 9 * day).toISOString(), null, 3, now), false);
+});
+
+test("harvey competition: credit lines and links count, bare mentions don't", () => {
+  const rivals = [{ id: "c1", name: "Mama Cass Catering", domain: "mamacass.ng", aliases: ["Mama Cass"] }, { id: "c2", name: "Eventful", domain: "eventful.com.ng", aliases: [] }];
+  const credited = detectCompetitor("<footer>Our partners: Mama Cass, Zenith Bank</footer>", "https://acme.ng/", rivals);
+  assert.equal(credited?.competitorId, "c1"); assert.equal(credited?.signal.key, "USES_COMPETITOR"); assert.ok(credited?.signal.evidence.includes("Mama Cass"));
+  const catered = detectCompetitor("<p>Our staff lunches are catered by Mama Cass Catering every Friday.</p>", "https://acme.ng/about", rivals);
+  assert.equal(catered?.signal.label, "Works with Mama Cass Catering");
+  const linked = detectCompetitor('<a href="https://www.eventful.com.ng/portfolio">Events by Eventful</a>', "https://acme.ng/", rivals);
+  assert.equal(linked?.competitorId, "c2"); assert.ok(linked?.signal.evidence.startsWith("Links to eventful.com.ng"));
+  assert.equal(detectCompetitor("<p>We are nothing like Mama Cass Catering.</p>", "https://acme.ng/", rivals), null); // bare mention
+  assert.equal(detectCompetitor("<p>Catered by Ma</p>", "https://acme.ng/", [{ id: "x", name: "Ma", domain: null, aliases: [] }]), null); // too short to trust
 });

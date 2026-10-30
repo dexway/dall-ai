@@ -6,7 +6,7 @@ import { requireWorkspace, canManage } from "@/lib/workspace";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatNaira } from "@/lib/money";
 import { GatewayError } from "@/lib/ai/gateway";
-import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal } from "@/lib/harvey/agent";
+import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal, suggestCompetitors, studyCompetitor } from "@/lib/harvey/agent";
 import { STAGES, STAGE_LABEL, domainOf, mailtoLink, whatsappLink, type Signal, type Person } from "@/lib/harvey/signals";
 import "./harvey.css";
 
@@ -33,11 +33,40 @@ async function saveSetup(f: FormData) {
   const s = (k: string, max = 600) => String(f.get(k) ?? "").trim().slice(0, max);
   await supabaseAdmin().from("harvey_settings").upsert({
     workspace_id: ctx.workspace.id, offer: s("offer", 1200), ideal_customers: s("ideal_customers"), areas: s("areas", 300), deciders: s("deciders", 300),
-    proof: s("proof", 1000), sender_name: s("sender_name", 80), followup_days: Math.min(21, Math.max(1, Number(f.get("followup_days")) || 3)),
+    proof: s("proof", 1000), sender_name: s("sender_name", 80), niche: s("niche", 300), differentiators: s("differentiators", 1200), followup_days: Math.min(21, Math.max(1, Number(f.get("followup_days")) || 3)),
     updated_by: ctx.user.id, updated_at: new Date().toISOString(),
   });
   revalidatePath("/dashboard/harvey");
   go("saved=setup");
+}
+
+async function competitorAct(f: FormData) {
+  "use server";
+  const { ctx, a } = await manager();
+  const what = String(f.get("do") ?? "");
+  const db = supabaseAdmin();
+  if (what === "suggest") {
+    let n = 0;
+    try { n = await suggestCompetitors(a); } catch (e) { go(`error=ai&why=${why(e)}#competition`); }
+    revalidatePath("/dashboard/harvey");
+    go(`saved=suggested&n=${n}#competition`);
+  }
+  if (what === "add") {
+    const name = String(f.get("name") ?? "").trim().slice(0, 120);
+    if (name.length < 2) go("error=name#competition");
+    const domain = domainOf(String(f.get("website") ?? "").trim());
+    const { data, error } = await db.from("harvey_competitors").insert({ workspace_id: ctx.workspace.id, name, website: domain ? `https://${domain}` : null, domain }).select("id").single();
+    if (error) go(`${error.code === "23505" ? "error=dup" : "error=save"}#competition`);
+    run(() => studyCompetitor(a, data!.id));
+  } else {
+    const id = String(f.get("id") ?? "");
+    const { data: c } = await db.from("harvey_competitors").select("id").eq("id", id).eq("workspace_id", ctx.workspace.id).maybeSingle();
+    if (!c) go("error=notfound");
+    if (what === "study") run(() => studyCompetitor(a, id));
+    if (what === "remove") await db.from("harvey_competitors").delete().eq("id", id);
+  }
+  revalidatePath("/dashboard/harvey");
+  go(`saved=${what === "remove" ? "1" : "studying"}#competition`);
 }
 
 async function findProspects() {
@@ -117,17 +146,19 @@ async function act(f: FormData) {
 type Research = { summary?: string; fit_reason?: string; angle?: string; decider?: { name: string; title: string; why: string }; risks?: string[]; signals?: Signal[]; people?: Person[]; pages?: { url: string; title: string }[] };
 
 const ERR: Record<string, string> = { role: "Only owners and admins can use Harvey.", notfound: "That prospect isn't in this business.", name: "Give the prospect a name.", dup: "That website is already in your pipeline.", save: "Couldn't save. Try again.", ai: "Harvey couldn't finish that", reply: "Paste the reply first." };
-const OK: Record<string, string> = { setup: "Saved. Harvey sells with this from now on.", added: "Prospect added.", researching: "Prospect added. Harvey is reading their website; refresh in a minute.", working: "Harvey is on it. Refresh in a few seconds to see the result.", deleted: "Prospect removed.", "1": "Saved." };
+const OK: Record<string, string> = { studying: "Harvey is studying that competitor: their site, prices and public reviews. Refresh in a minute.", setup: "Saved. Harvey sells with this from now on.", added: "Prospect added.", researching: "Prospect added. Harvey is reading their website; refresh in a minute.", working: "Harvey is on it. Refresh in a few seconds to see the result.", deleted: "Prospect removed.", "1": "Saved." };
 
 export default async function HarveyPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const ctx = await requireWorkspace();
   const sp = await searchParams;
   const db = supabaseAdmin();
   const ws = ctx.workspace.id;
-  const [{ data: s, error: setupErr }, { data: prospects }] = await Promise.all([
+  const [{ data: s, error: setupErr }, { data: prospects }, { data: competitors }] = await Promise.all([
     db.from("harvey_settings").select("*").eq("workspace_id", ws).maybeSingle(),
-    db.from("harvey_prospects").select("id,name,website,stage,fit,value_kobo,next_step,next_at,research,error,updated_at,contact_name").eq("workspace_id", ws).order("updated_at", { ascending: false }).limit(300),
+    db.from("harvey_prospects").select("id,name,website,stage,fit,value_kobo,next_step,next_at,research,error,updated_at,contact_name,competitor_id").eq("workspace_id", ws).order("updated_at", { ascending: false }).limit(300),
+    db.from("harvey_competitors").select("*").eq("workspace_id", ws).order("created_at"),
   ]);
+  const rivals = new Map((competitors ?? []).map((c) => [c.id, c.name as string]));
   if (setupErr) return <div className="page-head"><div><h1>Harvey</h1><p>Harvey, your sales agent, is waiting for a one-time database setup.</p></div></div>;
 
   const list = prospects ?? [];
@@ -147,7 +178,7 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
           <p>Harvey finds customers worth selling to, learns something real about each one, writes the outreach, follows up, answers replies and drafts proposals, all the way to a closed deal. You approve every message and send it in one tap from your own email or WhatsApp.</p></div>
       </div>
       {sp.error && <div className="notice notice-bad" role="alert">{ERR[sp.error] ?? "Something went wrong."}{sp.why ? `: ${decodeURIComponent(sp.why)}` : "."}</div>}
-      {sp.saved && <div className="notice notice-ok" role="status">{sp.saved === "found" ? `Harvey found ${sp.n ?? 0} new prospect${sp.n === "1" ? "" : "s"}. Open one to research it.` : OK[sp.saved] ?? "Saved."}</div>}
+      {sp.saved && <div className="notice notice-ok" role="status">{sp.saved === "suggested" ? `Harvey suggested ${sp.n ?? 0} competitor${sp.n === "1" ? "" : "s"}. Study them so it can go after their customers.` : sp.saved === "found" ? `Harvey found ${sp.n ?? 0} new prospect${sp.n === "1" ? "" : "s"}. Open one to research it.` : OK[sp.saved] ?? "Saved."}</div>}
 
       <div className="stats">
         <div className="stat"><span>Open deals</span><b>{open.length}</b></div>
@@ -160,6 +191,10 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
         <summary><b>{ready ? "What Harvey is selling" : "1 · Tell Harvey what to sell"}</b></summary>
         <form action={saveSetup} className="hv-form">
           <label className="field"><span>What you sell to these customers</span><textarea name="offer" rows={3} className="input" defaultValue={s?.offer} placeholder="Corporate event packages: conference hall for 50–300, catering, AV, rooms for out-of-town guests." required /></label>
+          <div className="hv-grid">
+            <label className="field"><span>Your niche</span><input name="niche" className="input" defaultValue={s?.niche} placeholder="Corporate event venues in Lekki and VI" /></label>
+            <label className="field"><span>Why customers pick you over competitors</span><input name="differentiators" className="input" defaultValue={s?.differentiators} placeholder="On-site parking for 200 cars, in-house caterer, 24h power" /></label>
+          </div>
           <label className="field"><span>Ideal customers</span><input name="ideal_customers" className="input" defaultValue={s?.ideal_customers} placeholder="Corporate offices, banks, NGOs, event planners, embassies" required /></label>
           <div className="hv-grid">
             <label className="field"><span>Areas</span><input name="areas" className="input" defaultValue={s?.areas} placeholder="Lekki, Victoria Island, Ikoyi" /></label>
@@ -174,6 +209,35 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
         </form>
       </details>
 
+      <section className="panel" id="competition">
+        <div className="hv-toolbar">
+          <div><h2>Your competition</h2><small className="muted">Harvey studies each competitor, spots prospects already working with them, and writes honest reasons to switch.</small></div>
+          <form action={competitorAct}><input type="hidden" name="do" value="suggest" /><button className="btn btn-line" disabled={!ready}>Suggest competitors</button></form>
+        </div>
+        {!(competitors ?? []).length ? <p className="muted">No competitors yet. Let Harvey suggest them for your niche, or add the ones you know.</p> : (
+          <div className="hv-rivals">{(competitors ?? []).map((c) => { const i = (c.intel ?? {}) as { offer?: string; positioning?: string; prices?: { item: string; price: string }[]; weaknesses?: { point: string; source: string }[]; clients?: string[]; switch_angle?: string }; const n = list.filter((p) => p.competitor_id === c.id).length; return (
+            <article key={c.id} className="hv-rival">
+              <header><b>{c.name}</b>{c.domain && <> · <a href={c.website ?? "#"} target="_blank" rel="noopener noreferrer"><small>{c.domain}</small></a></>}<span className={`hv-stage st-${c.status === "ready" ? "won" : c.status === "failed" ? "lost" : "contacted"}`}>{c.status === "ready" ? "Studied" : c.status === "studying" ? "Studying…" : c.status === "failed" ? "Failed" : "Not studied"}</span></header>
+              {c.error && <small className="hyp">{c.error}</small>}
+              {i.offer && <p><small>{i.offer}</small></p>}
+              {i.prices?.length ? <p><small><b>Prices seen:</b> {i.prices.map((x) => `${x.item} ${x.price}`).join(" · ")}</small></p> : null}
+              {i.weaknesses?.length ? <ul className="hv-weak">{i.weaknesses.map((w) => <li key={w.point}><small>{w.point} · <a href={w.source} target="_blank" rel="noopener noreferrer">source</a></small></li>)}</ul> : null}
+              {i.switch_angle && <p><small><b>Why switch to you:</b> {i.switch_angle}</small></p>}
+              <p><small className="muted">{i.clients?.length ? `${i.clients.length} public client${i.clients.length === 1 ? "" : "s"} found · ` : ""}{n} of your prospects work with them</small></p>
+              <div className="row">
+                <form action={competitorAct}><input type="hidden" name="do" value="study" /><input type="hidden" name="id" value={c.id} /><button className="btn btn-line btn-sm">{c.status === "ready" ? "Study again" : "Study"}</button></form>
+                <form action={competitorAct}><input type="hidden" name="do" value="remove" /><input type="hidden" name="id" value={c.id} /><button className="btn btn-line btn-sm">Remove</button></form>
+              </div>
+            </article>); })}</div>
+        )}
+        <form action={competitorAct} className="hv-grid" style={{ marginTop: 10 }}>
+          <input type="hidden" name="do" value="add" />
+          <label className="field"><span>Competitor name</span><input name="name" className="input" required /></label>
+          <label className="field"><span>Their website</span><input name="website" className="input" placeholder="theirsite.com" /></label>
+          <div style={{ alignSelf: "end" }}><button className="btn btn-ink">Add and study</button></div>
+        </form>
+      </section>
+
       <section className="panel">
         <div className="hv-toolbar">
           <h2>Pipeline</h2>
@@ -187,7 +251,7 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
           <div className="table-wrap"><table><thead><tr><th>Prospect</th><th>Stage</th><th className="num">Fit</th><th>Why now</th><th>Next step</th><th className="num">Value</th></tr></thead><tbody>
             {shown.map((p) => { const r = (p.research ?? {}) as Research; return (
               <tr key={p.id} className={sel?.id === p.id ? "hv-sel" : ""}>
-                <td><Link href={`/dashboard/harvey?p=${p.id}${stage ? `&stage=${stage}` : ""}#deal`}><b>{p.name}</b></Link><br /><small className="muted">{p.contact_name ?? domainOf(p.website) ?? ""}</small></td>
+                <td><Link href={`/dashboard/harvey?p=${p.id}${stage ? `&stage=${stage}` : ""}#deal`}><b>{p.name}</b></Link><br /><small className="muted">{p.contact_name ?? domainOf(p.website) ?? ""}</small>{p.competitor_id && rivals.get(p.competitor_id) ? <><br /><span className="hv-uses">Uses {rivals.get(p.competitor_id)}</span></> : null}</td>
                 <td><span className={`hv-stage st-${p.stage}`}>{STAGE_LABEL[p.stage as keyof typeof STAGE_LABEL]}</span></td>
                 <td className="num">{p.fit ?? "–"}</td>
                 <td><small>{p.error ? <span className="hyp">{p.error}</span> : r.angle ?? r.signals?.[0]?.label ?? "Not researched yet"}</small></td>
