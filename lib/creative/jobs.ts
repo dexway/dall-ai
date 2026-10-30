@@ -9,7 +9,12 @@ import { ProductionSpec } from "@/lib/creative/schemas";
 import { MotionPack } from "@/lib/creative/motion";
 import { planMotionGeneration, totalOf, type MotionLine } from "@/lib/creative/motion-gen";
 
-const creds = () => ({ keyId: process.env.HIGGSFIELD_API_KEY_ID ?? "", secret: process.env.HIGGSFIELD_API_KEY_SECRET ?? "" });
+/** Higgsfield key from HF_CREDENTIALS ("KEY_ID:KEY_SECRET", the SDK's format) or the two separate variables. */
+const creds = () => {
+  const [id, ...rest] = (process.env.HF_CREDENTIALS ?? "").split(":");
+  if (id && rest.length) return { keyId: id, secret: rest.join(":") };
+  return { keyId: process.env.HIGGSFIELD_API_KEY_ID ?? "", secret: process.env.HIGGSFIELD_API_KEY_SECRET ?? "" };
+};
 export const generationConfigured = () => Boolean(creds().keyId && creds().secret);
 const MAX_SUBMIT_ATTEMPTS = 5;
 
