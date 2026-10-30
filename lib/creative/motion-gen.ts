@@ -18,7 +18,7 @@ export type MotionLine = {
   };
 };
 
-const MAX_EDITS = 3;
+const MAX_EDITS = 3, MAX_UPSCALES = 4;
 const BEAT: Record<string, string> = { hook: "Hook", problem: "Desire", space: "The new thing", payoff: "Payoff", cta: "Logo + CTA" };
 
 /** Every line the plan needs, with the best enabled model and its price; problems say what's missing. */
@@ -33,6 +33,15 @@ export function planMotionGeneration(pack: MotionPack, models: ModelRow[]): { li
     const finalSpec = { ...spec, duration_seconds: pick.model.kind === "video" ? Math.min(spec.duration_seconds ?? 5, pick.model.max_seconds ?? 10) : undefined };
     lines.push({ key, label, task, model: pick.model, fallback: pick.fallback, spec: finalSpec, estimate: estimateCost(pick.model, finalSpec) });
   };
+
+  // Upscaling must never change a photo, so it only runs on a model tagged for it (no fallback).
+  pack.assets.filter((x) => x.upscale && x.role !== "skip").slice(0, MAX_UPSCALES).forEach((x, i) => {
+    const label = `Upscale ${x.area || `photo ${i + 1}`}`;
+    const pick = chooseModel("upscale_photo", models);
+    if (!pick || pick.fallback || !pick.model.image_param) { problems.push(`${label}: no upscaler model is enabled yet (tag one "Upscale photo" in admin).`); return; }
+    const spec: MotionLine["spec"] = { objective: "Sharpen without changing anything", prompt: "Upscale this photo. Keep every detail, colour, person, object and text exactly as it is; only increase resolution and sharpness.", negative: "changes, new objects, altered faces, altered text, style changes", aspect_ratio: aspect, resolution: "", variations: 1, output: "image", scenes: [], reference_asset_paths: [x.path] };
+    lines.push({ key: `upscale:${i}`, label, task: "upscale_photo", model: pick.model, fallback: false, spec, estimate: estimateCost(pick.model, spec) });
+  });
 
   pack.enhancements.slice(0, MAX_EDITS).forEach((e, i) => add(`edit:${i}`, `Photo edit ${i + 1}${e.concept ? " (concept)" : ""}`, "photo_edit", {
     objective: e.direction, aspect_ratio: (e.crops[0] ?? aspect), resolution: "", variations: 1, output: "image", scenes: [],

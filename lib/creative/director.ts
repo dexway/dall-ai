@@ -9,7 +9,8 @@ import {
   enforceSources, normalizeUrl, parseJson,
 } from "@/lib/creative/schemas";
 import { EDITABLE_BY_AI } from "@/lib/creative/rules";
-import { MOTION_SKILL, MOTION_PACK_SCHEMA, MotionBrief, MotionPack, motionRequest, enforcePack } from "@/lib/creative/motion";
+import { MOTION_SKILL, MOTION_PACK_SCHEMA, MotionBrief, MotionPack, motionRequest, enforcePack, type PhotoInfo } from "@/lib/creative/motion";
+import { siteDigest, type SitePage } from "@/lib/creative/site-parse";
 import type { z } from "zod";
 
 // Model choice per task: strategic work on the stronger model, reformatting on the cheaper one.
@@ -260,7 +261,7 @@ Write a precise production spec: one strong prompt (subject, setting, light, cam
 }
 
 const PHOTO = /\.(png|jpe?g|webp)$/i;
-const MAX_MOTION_PHOTOS = 10;
+const MAX_MOTION_PHOTOS = 14;
 
 /**
  * Drafts a motion video production pack from the brand's own photos and the owner's brief. Claude sees
@@ -275,15 +276,23 @@ export async function draftMotionPack(ctx: Ctx, projectId: string): Promise<void
   try {
     const { brand, profile } = await brandContext(ctx.brandId);
     const brief = MotionBrief.parse(proj.brief ?? {});
-    const photos = (brand.asset_paths as string[]).filter((p) => PHOTO.test(p)).slice(-MAX_MOTION_PHOTOS);
-    if (!photos.length) throw new Error("Upload your logo and photos first (Brief → Brand files).");
+    // The owner's uploads first, then the website's photos (best first), up to the limit.
+    const site = brand.site_content as { pages?: SitePage[]; images?: { path: string; alt: string; width: number | null; height: number | null; logo: boolean; page: string }[] } | null;
+    const fromSite = (site?.images ?? []).map((i) => i.path);
+    const uploads = (brand.asset_paths as string[]).filter((p) => PHOTO.test(p) && !fromSite.includes(p)).slice(-8);
+    const photos = [...uploads, ...fromSite.filter((p) => (brand.asset_paths as string[]).includes(p))].slice(0, MAX_MOTION_PHOTOS);
+    if (!photos.length) throw new Error("Add your website or upload your logo and photos first.");
+    const info: Record<string, PhotoInfo> = Object.fromEntries([
+      ...uploads.map((p) => [p, { source: "upload" } as PhotoInfo]),
+      ...(site?.images ?? []).map((i) => [i.path, { source: "website", alt: i.alt, width: i.width, height: i.height, logo: i.logo, page: i.page } as PhotoInfo]),
+    ]);
     const { data: signed } = await db.storage.from("creative-assets").createSignedUrls(photos, 600);
     const images: Anthropic.ContentBlockParam[] = (signed ?? []).flatMap((s, i) => s.signedUrl
       ? [{ type: "text", text: `Photo ${i + 1}: ${photos[i]}` } as const, { type: "image", source: { type: "url", url: s.signedUrl } } as Anthropic.ImageBlockParam]
       : []);
     const msg = await directorCall(ctx, {
       feature: "creative_motion", model: STRATEGY_MODEL(), maxTokens: 8000, system: MOTION_SKILL,
-      messages: [{ role: "user", content: [...images, { type: "text", text: motionRequest({ name: brand.name, brief, profile, photos }) }] }],
+      messages: [{ role: "user", content: [...images, { type: "text", text: motionRequest({ name: brand.name, brief, profile, photos, info, site: site?.pages?.length ? siteDigest(site.pages) : undefined }) }] }],
     }, 0.8);
     const pack = enforcePack(await validated(ctx, MotionPack, textOf(msg), MOTION_PACK_SCHEMA), photos, brief.duration, brief.kind);
     if (brief.script) pack.provisional = false;

@@ -50,6 +50,12 @@ When the brief's kind is "launch", the video announces something new: a business
 PHASE 4 · SCRIPT
 - If the owner gave a script, map each line to the best visual. If not, write a provisional script, mark the plan as provisional, and say what you need from the owner.
 
+WEBSITE CONTENT
+- When the business's website content is given, treat it as the richest source of real facts and words: names of rooms, dishes, services, products, prices, opening hours, locations, awards, slogans and the brand's own phrasing. Build the hook, on-screen text and voiceover from these specifics instead of generic lines. Quote the brand's own phrases where they are strong.
+- Photos marked "website" came from the business's own site. Prefer them for real places, products and people over guessing. Never use a logo as a scene background; use it for the logo + CTA beat.
+- Mark "upscale": true for a photo you want to use that is under 1080px on its short side or looks soft, so it can be upscaled before it is edited or animated. Upscaling must keep the photo exactly as it is: sharper, not changed.
+- Facts on the website may be out of date: if a price or date matters to a scene, list it in needs_from_owner to confirm.
+
 HONESTY
 - Everything you produce is a plan until it has actually been generated. Never claim an image or video exists.
 - Use only the facts in the brief and the business profile. No invented prices, awards, reviews or amenities. Respect restrictions and prohibited claims absolutely.
@@ -133,7 +139,8 @@ export const MotionPack = z.object({
   provisional: z.boolean().default(true),   // true until it follows the owner's own script
   needs_from_owner: z.array(str(300)).max(8).default([]),
   assets: z.array(z.object({
-    path: str(400), area: opt(120), role: z.enum(["hero", "support", "detail", "skip"]),
+    path: str(400), area: opt(120), role: z.enum(["hero", "support", "detail", "logo", "skip"]),
+    upscale: z.boolean().default(false),
     assessment: str(500), use_for: opt(200),
   })).max(20).default([]),
   enhancements: z.array(z.object({
@@ -151,10 +158,12 @@ export const MotionPack = z.object({
 });
 export type MotionPack = z.infer<typeof MotionPack>;
 
-export const MOTION_PACK_SCHEMA = `{"provisional":bool,"needs_from_owner":[string],"assets":[{"path","area","role":"hero|support|detail|skip","assessment","use_for"}],"enhancements":[{"source_path","direction","prompt","negative","keep_unchanged","crops":["9:16|4:5|1:1|16:9"],"concept":bool,"rank":int}],"storyboard":{"title","duration":number,"aspect_ratio":"9:16|1:1|16:9|4:5","scenes":[{"beat":"hook|problem|space|payoff|cta","start":seconds,"end":seconds,"voiceover","on_screen_text","visual_objective","source_photo","shot","camera","motion","prompt","negative","transition","sound","audience_response"}]},"cutdowns":[{"platform","aspect_ratio","note"}],"checks":[string]}`;
+export const MOTION_PACK_SCHEMA = `{"provisional":bool,"needs_from_owner":[string],"assets":[{"path","area","role":"hero|support|detail|logo|skip","upscale":bool,"assessment","use_for"}],"enhancements":[{"source_path","direction","prompt","negative","keep_unchanged","crops":["9:16|4:5|1:1|16:9"],"concept":bool,"rank":int}],"storyboard":{"title","duration":number,"aspect_ratio":"9:16|1:1|16:9|4:5","scenes":[{"beat":"hook|problem|space|payoff|cta","start":seconds,"end":seconds,"voiceover","on_screen_text","visual_objective","source_photo","shot","camera","motion","prompt","negative","transition","sound","audience_response"}]},"cutdowns":[{"platform","aspect_ratio","note"}],"checks":[string]}`;
 
 /** The request that sits under the skill: the owner's brief, the business facts and the photo list. */
-export function motionRequest(a: { name: string; brief: MotionBrief; profile: Partial<BrandProfile>; photos: string[] }): string {
+export type PhotoInfo = { source: "website" | "upload"; alt?: string; width?: number | null; height?: number | null; logo?: boolean; page?: string };
+
+export function motionRequest(a: { name: string; brief: MotionBrief; profile: Partial<BrandProfile>; photos: string[]; info?: Record<string, PhotoInfo>; site?: string }): string {
   const b = a.brief, plat = MOTION_PLATFORMS[b.platform];
   return `Business: ${a.name}
 Business profile (facts you may use): ${JSON.stringify({ website: a.profile.website, industry: a.profile.industry, location: a.profile.location, products: a.profile.products, offers: a.profile.offers, differentiators: a.profile.differentiators, promotions: a.profile.promotions, language: a.profile.language })}
@@ -172,10 +181,10 @@ Owner's brief:
 - Platform: ${plat.label}, ${plat.aspect}, ${b.duration} seconds.
 - Script: ${b.script ? `\n${b.script}` : "none yet: write a provisional one and set provisional true."}
 
-Photos of the real space (shown above in this order; refer to them by these paths only):
-${a.photos.map((p, i) => `${i + 1}. ${p}`).join("\n") || "none"}
+${a.site ? `Website content (the business's own words and facts; use the specifics):\n${a.site}\n\n` : ""}Photos of the real business (shown above in this order; refer to them by these paths only):
+${a.photos.map((p, i) => { const x = a.info?.[p]; const meta = x ? ` [${x.source}${x.logo ? ", logo" : ""}${x.width && x.height ? `, ${x.width}x${x.height}` : ""}${x.alt ? `, "${x.alt}"` : ""}]` : ""; return `${i + 1}. ${p}${meta}`; }).join("\n") || "none"}
 
-Produce the production pack${b.kind === "launch" ? " for a motion-graphics launch video (fill \"motion\" for every scene)" : ""}: asset review for every photo, ranked enhancement edits for the best ones (max 6), a ${b.duration}-second storyboard following the five beats, Higgsfield prompts per scene that start from the named source photo, cutdowns for other platforms, and the checks you ran. Scenes must cover 0 to ${b.duration} seconds without gaps. Use only listed photo paths. Reply with JSON only:
+Produce the production pack${a.site ? ", built from the website content above" : ""}${b.kind === "launch" ? " for a motion-graphics launch video (fill \"motion\" for every scene)" : ""}: asset review for every photo, ranked enhancement edits for the best ones (max 6), a ${b.duration}-second storyboard following the five beats, Higgsfield prompts per scene that start from the named source photo, cutdowns for other platforms, and the checks you ran. Scenes must cover 0 to ${b.duration} seconds without gaps. Use only listed photo paths. Reply with JSON only:
 ${MOTION_PACK_SCHEMA}`;
 }
 
