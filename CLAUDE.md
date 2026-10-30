@@ -11,7 +11,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 ## Commands
 - `npm test` — node --test with --experimental-strip-types (pglite runs every migration). No TS parameter properties in files tests import.
 - `npx tsc --noEmit -p .` and `npx next build` before pushing.
-- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0026 are applied in production.
+- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0027 are applied in production.
 
 ## Map
 - Channels: `lib/channels/{events,send,process}.ts`, webhooks in `app/api/webhooks/*`.
