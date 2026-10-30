@@ -64,10 +64,10 @@ const guarded = new Agent({
 });
 
 /** Fetches a public URL's bytes: http(s) only, public IPs only, max 3 redirects, 10 s, capped size. */
-export async function fetchPublic(raw: string, maxBytes = 1_500_000): Promise<{ bytes: Buffer; contentType: string; url: string; truncated: boolean }> {
+export async function fetchPublic(raw: string, maxBytes = 1_500_000, headers: Record<string, string> = {}, timeoutMs = 10_000): Promise<{ bytes: Buffer; contentType: string; url: string; truncated: boolean }> {
   let url = checkUrlShape(raw);
   for (let hop = 0; hop <= 3; hop++) {
-    const res = await ufetch(url, { dispatcher: guarded, redirect: "manual", headers: { "User-Agent": "DallAI-bot/1.0" }, signal: AbortSignal.timeout(10_000) });
+    const res = await ufetch(url, { dispatcher: guarded, redirect: "manual", headers: { "User-Agent": "DallAI-bot/1.0", ...headers }, signal: AbortSignal.timeout(timeoutMs) });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       if (!loc) throw new Error("Redirect without a location.");

@@ -6,7 +6,7 @@ import { pollCreativeJobs } from "@/lib/creative/jobs";
 import { runAutopilot } from "@/lib/autopilot";
 import { offerLaunchVideos } from "@/lib/creative/launch-offer";
 import { importPendingSites } from "@/lib/creative/site-import";
-import { runHarveyFollowups } from "@/lib/harvey/agent";
+import { runHarveyFollowups, runHarveyCompetition } from "@/lib/harvey/agent";
 
 export const maxDuration = 300;
 
@@ -42,5 +42,6 @@ export async function POST(req: Request) {
   // Harvey: draft follow-ups for deals that went quiet (the owner still sends them).
   let harveyFollowups = 0;
   try { harveyFollowups = await runHarveyFollowups(); } catch (e) { console.error("[cron] harvey follow-ups failed", (e as Error).message); }
+  try { await runHarveyCompetition(); } catch (e) { console.error("[cron] harvey competition failed", (e as Error).message); }
   return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers, sitesImported, harveyFollowups });
 }
