@@ -6,6 +6,8 @@ import { reserve, settle, QuotaError } from "@/lib/creative/budget";
 import { estimateCost, providerInput, jobStatusFrom, NOT_CHARGED, type ModelRow } from "@/lib/creative/rules";
 import { hfSubmit, hfStatus, hfOutputs, HfError } from "@/lib/creative/higgsfield";
 import { ProductionSpec } from "@/lib/creative/schemas";
+import { MotionPack } from "@/lib/creative/motion";
+import { planMotionGeneration, totalOf, type MotionLine } from "@/lib/creative/motion-gen";
 
 const creds = () => ({ keyId: process.env.HIGGSFIELD_API_KEY_ID ?? "", secret: process.env.HIGGSFIELD_API_KEY_SECRET ?? "" });
 export const generationConfigured = () => Boolean(creds().keyId && creds().secret);
@@ -47,14 +49,7 @@ export async function authorizeBatch(a: { workspaceId: string; brandId: string; 
   if (!q.lines.length) throw new QuotaError("INVALID", "Nothing to generate.");
   if (Math.abs(q.total - a.confirmedTotal) > 0.000001) throw new QuotaError("PRICE_CHANGED", `The estimate changed to $${q.total.toFixed(4)}. Review it and confirm again.`);
 
-  const { data: pols } = await db.from("quota_policies").select("scope,scope_id,max_batch,max_concurrent").eq("resource", "media_usd").eq("enabled", true);
-  const { data: sub } = await db.from("platform_subscriptions").select("plan_id").eq("workspace_id", a.workspaceId).maybeSingle();
-  const applies = (p: { scope: string; scope_id: string | null }) => p.scope === "platform" || (p.scope === "plan" && p.scope_id === sub?.plan_id) || (p.scope === "org" && p.scope_id === a.workspaceId) || (p.scope === "brand" && p.scope_id === a.brandId) || (p.scope === "user" && p.scope_id === a.userId);
-  const maxBatch = Math.min(...(pols ?? []).filter(applies).map((p) => p.max_batch ?? Infinity), 20);
-  const maxConc = Math.min(...(pols ?? []).filter(applies).map((p) => p.max_concurrent ?? Infinity), 10);
-  if (q.lines.length > maxBatch) throw new QuotaError("BATCH", `You can generate up to ${maxBatch} items at once.`);
-  const { count: running } = await db.from("generation_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", a.workspaceId).in("status", ["authorized", "submitting", "queued", "in_progress", "uncertain"]);
-  if ((running ?? 0) + q.lines.length > maxConc) throw new QuotaError("CONCURRENCY", `Only ${maxConc} generations can run at once; ${running ?? 0} are running.`);
+  await checkLimits(a, q.lines.length);
 
   const created: string[] = [];
   for (const l of q.lines) {
@@ -83,6 +78,73 @@ export async function authorizeBatch(a: { workspaceId: string; brandId: string; 
   return created;
 }
 
+/** Batch size and concurrency limits from the admin's quota policies (platform, plan, org, brand, user). */
+async function checkLimits(a: { workspaceId: string; brandId: string; userId: string }, n: number) {
+  const db = supabaseAdmin();
+  const { data: pols } = await db.from("quota_policies").select("scope,scope_id,max_batch,max_concurrent").eq("resource", "media_usd").eq("enabled", true);
+  const { data: sub } = await db.from("platform_subscriptions").select("plan_id").eq("workspace_id", a.workspaceId).maybeSingle();
+  const applies = (p: { scope: string; scope_id: string | null }) => p.scope === "platform" || (p.scope === "plan" && p.scope_id === sub?.plan_id) || (p.scope === "org" && p.scope_id === a.workspaceId) || (p.scope === "brand" && p.scope_id === a.brandId) || (p.scope === "user" && p.scope_id === a.userId);
+  const maxBatch = Math.min(...(pols ?? []).filter(applies).map((p) => p.max_batch ?? Infinity), 20);
+  const maxConc = Math.min(...(pols ?? []).filter(applies).map((p) => p.max_concurrent ?? Infinity), 10);
+  if (n > maxBatch) throw new QuotaError("BATCH", `You can generate up to ${maxBatch} items at once.`);
+  const { count: running } = await db.from("generation_jobs").select("id", { count: "exact", head: true }).eq("workspace_id", a.workspaceId).in("status", ["authorized", "submitting", "queued", "in_progress", "uncertain"]);
+  if ((running ?? 0) + n > maxConc) throw new QuotaError("CONCURRENCY", `Only ${maxConc} generations can run at once; ${running ?? 0} are running.`);
+}
+
+/** Server-side quote for an APPROVED motion plan: every edit and scene with its model and price. */
+export async function quoteMotion(workspaceId: string, projectId: string): Promise<{ project: { id: string; brand_id: string; version: number } | null; lines: MotionLine[]; total: number; problems: string[] }> {
+  const db = supabaseAdmin();
+  const { data: proj } = await db.from("motion_projects").select("id,brand_id,version,status,pack").eq("id", projectId).eq("workspace_id", workspaceId).maybeSingle();
+  if (!proj) return { project: null, lines: [], total: 0, problems: ["That motion plan isn't in this business."] };
+  if (proj.status !== "approved") return { project: proj, lines: [], total: 0, problems: ["Approve the plan before making it."] };
+  const pack = MotionPack.safeParse(proj.pack);
+  if (!pack.success) return { project: proj, lines: [], total: 0, problems: ["The plan is in an old format. Write the storyboard again."] };
+  const { data: models } = await db.from("provider_models").select("*").eq("enabled", true);
+  const { lines, problems } = planMotionGeneration(pack.data, (models ?? []).map((m) => ({ ...m, usd_per_unit: Number(m.usd_per_unit) }) as ModelRow));
+  return { project: proj, lines, total: totalOf(lines), problems };
+}
+
+/**
+ * The owner's "make these for $X" click on a motion plan. Re-quotes on the server, refuses a changed
+ * price, enforces limits, holds budget per job and records each job. Keys are tied to the plan version
+ * and spec, so the same approval is never charged twice. Jobs then run through the normal poller.
+ */
+export async function authorizeMotion(a: { workspaceId: string; brandId: string; userId: string; projectId: string; keys: string[]; confirmedTotal: number }): Promise<string[]> {
+  if (!generationConfigured()) throw new QuotaError("NOT_CONFIGURED", "Image and video generation isn't connected yet: a Dall AI admin needs to add the Higgsfield API key.");
+  const db = supabaseAdmin();
+  const q = await quoteMotion(a.workspaceId, a.projectId);
+  if (!q.project || q.project.brand_id !== a.brandId) throw new QuotaError("INVALID", q.problems[0] ?? "That motion plan isn't in this brand.");
+  const lines = q.lines.filter((l) => a.keys.includes(l.key));
+  if (!lines.length) throw new QuotaError("INVALID", q.problems[0] ?? "Pick at least one scene or edit to make.");
+  const total = totalOf(lines);
+  if (Math.abs(total - a.confirmedTotal) > 0.000001) throw new QuotaError("PRICE_CHANGED", `The estimate changed to $${total.toFixed(4)}. Review it and confirm again.`);
+  await checkLimits(a, lines.length);
+
+  const created: string[] = [];
+  for (const l of lines) {
+    const key = `motion:${a.projectId}:v${q.project.version}:${l.key}:${createHash("sha256").update(JSON.stringify(l.spec) + l.model.id).digest("hex").slice(0, 24)}`;
+    const { data: existing } = await db.from("generation_jobs").select("id").eq("idempotency_key", key).maybeSingle();
+    if (existing) continue;
+    const resMoney = await reserve({ workspaceId: a.workspaceId, brandId: a.brandId, userId: a.userId, resource: "media_usd", amount: l.estimate, jobRef: key });
+    try {
+      await reserve({ workspaceId: a.workspaceId, brandId: a.brandId, userId: a.userId, resource: l.model.kind === "video" ? "video_generations" : "image_generations", amount: 1, jobRef: key });
+    } catch (e) { await settle(resMoney, 0, "higgsfield", l.model.endpoint); throw e; }
+    let refs: string[] = [];
+    if (l.model.image_param && l.spec.reference_asset_paths.length) {
+      const { data: signed } = await db.storage.from("creative-assets").createSignedUrls(l.spec.reference_asset_paths, 60 * 60 * 24);
+      refs = (signed ?? []).map((x) => x.signedUrl).filter(Boolean) as string[];
+    }
+    const { data: job, error } = await db.from("generation_jobs").insert({
+      workspace_id: a.workspaceId, brand_id: a.brandId, item_id: null, motion_project_id: a.projectId, scene_key: l.key, model_id: l.model.id, spec: l.spec,
+      input: providerInput(l.model, l.spec, refs), idempotency_key: key, est_cost_usd: l.estimate, reservation_id: resMoney, authorized_by: a.userId,
+    }).select("id").single();
+    if (error) { await settle(resMoney, 0, "higgsfield", l.model.endpoint); throw new Error(error.message); }
+    await db.from("approval_events").insert({ workspace_id: a.workspaceId, entity: "generation", entity_id: job!.id, action: "authorize_generation", actor: a.userId, details: { motion_project_id: a.projectId, scene: l.key, model: l.model.endpoint, estimate_usd: l.estimate } });
+    created.push(job!.id);
+  }
+  return created;
+}
+
 async function holdsFor(key: string) {
   const { data } = await supabaseAdmin().from("budget_reservations").select("id,resource,amount").eq("job_ref", key).eq("status", "held");
   return data ?? [];
@@ -103,7 +165,7 @@ export async function submitJob(jobId: string): Promise<void> {
   try {
     const r = await hfSubmit({ ...creds(), endpoint, input: job.input, idempotencyKey: job.idempotency_key, webhookUrl: hook });
     await db.from("generation_jobs").update({ status: jobStatusFrom(r.status) ?? "queued", provider_request_id: r.request_id, status_url: r.status_url ?? null, submitted_at: new Date().toISOString(), error: null }).eq("id", jobId);
-    await db.from("content_items").update({ status: "generating" }).eq("id", job.item_id);
+    if (job.item_id) await db.from("content_items").update({ status: "generating" }).eq("id", job.item_id);
   } catch (e) {
     const err = e as HfError;
     if (err.ambiguous && job.attempts + 1 < MAX_SUBMIT_ATTEMPTS) {
@@ -114,7 +176,7 @@ export async function submitJob(jobId: string): Promise<void> {
     } else {
       // Clearly rejected (4xx): nothing was charged, release the budget.
       await db.from("generation_jobs").update({ status: "failed", error: err.message.slice(0, 400), finished_at: new Date().toISOString() }).eq("id", jobId);
-      await db.from("content_items").update({ status: "failed" }).eq("id", job.item_id);
+      if (job.item_id) await db.from("content_items").update({ status: "failed" }).eq("id", job.item_id);
       await closeHolds(job.idempotency_key, false, endpoint);
     }
   }
@@ -130,7 +192,7 @@ export async function applyProviderStatus(jobId: string, s: { status: string; er
   if (status === "queued" || status === "in_progress") { await db.from("generation_jobs").update({ status }).eq("id", jobId); return; }
   if (status && NOT_CHARGED.has(status)) {
     await db.from("generation_jobs").update({ status, error: s.error ?? (status === "nsfw" ? "Blocked by the provider's content moderation." : null), finished_at: new Date().toISOString() }).eq("id", jobId);
-    await db.from("content_items").update({ status: "failed" }).eq("id", job.item_id);
+    if (job.item_id) await db.from("content_items").update({ status: "failed" }).eq("id", job.item_id);
     await closeHolds(job.idempotency_key, false, endpoint);
     return;
   }
@@ -149,12 +211,12 @@ export async function applyProviderStatus(jobId: string, s: { status: string; er
     const up = await db.storage.from("creative-assets").upload(path, buf, { contentType: type, upsert: true });
     if (up.error) throw new Error(`Storage upload failed: ${up.error.message}`);
     paths.push(path);
-    await db.from("creative_assets").insert({ workspace_id: job.workspace_id, brand_id: job.brand_id, item_id: job.item_id, job_id: job.id, path, kind: (job.provider_models as { kind: string }).kind, content_type: type, bytes: buf.length });
+    await db.from("creative_assets").insert({ workspace_id: job.workspace_id, brand_id: job.brand_id, item_id: job.item_id, motion_project_id: job.motion_project_id ?? null, job_id: job.id, path, kind: (job.provider_models as { kind: string }).kind, content_type: type, bytes: buf.length });
   }
   if (!paths.length) throw new Error("The provider reported success but returned no files.");
   // Verified and stored: only now is the item ready, and the (priced) cost booked.
   await db.from("generation_jobs").update({ status: "stored", output_paths: paths, actual_cost_usd: job.est_cost_usd }).eq("id", jobId);
-  await db.from("content_items").update({ status: "generated", updated_at: new Date().toISOString() }).eq("id", job.item_id);
+  if (job.item_id) await db.from("content_items").update({ status: "generated", updated_at: new Date().toISOString() }).eq("id", job.item_id);
   await closeHolds(job.idempotency_key, true, endpoint);
 }
 

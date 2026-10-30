@@ -3,7 +3,7 @@ import { requireWorkspace } from "@/lib/workspace";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { BrandProfile, missingBrief, ResearchReport, Strategy, type Idea } from "@/lib/creative/schemas";
 import { estimateCost, type ModelRow } from "@/lib/creative/rules";
-import { generationConfigured } from "@/lib/creative/jobs";
+import { generationConfigured, quoteMotion } from "@/lib/creative/jobs";
 import { MotionBrief, MotionPack, prefillMotionBrief, motionQuestions, GOALS, MOTION_PLATFORMS } from "@/lib/creative/motion";
 import * as A from "./actions";
 import StudioDemo from "./StudioDemo";
@@ -552,8 +552,50 @@ async function Motion({ B, ws, name, profile, assets, sp }: { B: string; ws: str
             <td>{sc.motion && <details><summary>Animation</summary><p><small>{sc.motion}</small></p></details>}<small>{sc.camera}{sc.transition ? ` · ${sc.transition}` : ""}{sc.sound ? ` · ${sc.sound}` : ""}</small></td></tr>)}
         </tbody></table></div>
         {p.cutdowns.length > 0 && <p className="muted">Cutdowns: {p.cutdowns.map((c) => `${c.platform} ${c.aspect_ratio}`).join(" · ")}</p>}
+        {proj!.status === "approved" && <MakeMotion B={B} ws={ws} projectId={proj!.id} />}
         {proj!.status === "ready" && <form action={A.approveMotionPack}><input type="hidden" name="b" value={B} /><input type="hidden" name="project" value={proj!.id} /><button className="btn btn-ink">Approve this plan</button></form>}
       </>}
     </section>
+  );
+}
+
+/** After approval: price every edit and scene on Higgsfield, make them on the owner's yes, show results. */
+async function MakeMotion({ B, ws, projectId }: { B: string; ws: string; projectId: string }) {
+  const db = supabaseAdmin();
+  const configured = generationConfigured();
+  const [q, { data: jobs }] = await Promise.all([
+    quoteMotion(ws, projectId),
+    db.from("generation_jobs").select("id,scene_key,status,error,output_paths,est_cost_usd,created_at,provider_models(name)").eq("motion_project_id", projectId).order("created_at", { ascending: false }),
+  ]);
+  const latest = new Map<string, NonNullable<typeof jobs>[number]>();
+  for (const j of jobs ?? []) if (j.scene_key && !latest.has(j.scene_key)) latest.set(j.scene_key, j);
+  const paths = [...latest.values()].flatMap((j) => (j.output_paths ?? []) as string[]);
+  const { data: signed } = paths.length ? await db.storage.from("creative-assets").createSignedUrls(paths, 3600) : { data: [] };
+  const url = new Map(paths.map((p, i) => [p, signed?.[i]?.signedUrl ?? ""]));
+  const busy = (s: string) => ["authorized", "submitting", "queued", "in_progress", "uncertain", "completed"].includes(s);
+  const todo = q.lines.filter((l) => { const j = latest.get(l.key); return !j || ["failed", "nsfw", "canceled"].includes(j.status); });
+  const todoTotal = Math.round(todo.reduce((s, l) => s + l.estimate, 0) * 1e6) / 1e6;
+  return (
+    <div className="panel" style={{ marginTop: 12 }}>
+      <h3>Make it</h3>
+      {!configured && <div className="notice" style={{ background: "#FBF0DC", color: "#8A5A0B" }}>Video and image generation switches on once Higgsfield is connected (API key, enabled models with prices, and a media spending cap). Your plan is saved and ready.</div>}
+      {q.problems.length > 0 && <ul className="muted">{q.problems.map((p) => <li key={p}>{p}</li>)}</ul>}
+      {q.lines.length > 0 && <div className="table-wrap"><table><thead><tr><th>Piece</th><th>Model</th><th className="num">Estimate</th><th>Result</th></tr></thead><tbody>
+        {q.lines.map((l) => { const j = latest.get(l.key); const out = ((j?.output_paths ?? []) as string[]).map((p) => url.get(p)).filter(Boolean) as string[]; return (
+          <tr key={l.key}><td>{l.label}</td><td><small>{l.model.name}{l.fallback ? " (closest available)" : ""}</small></td><td className="num">${l.estimate.toFixed(2)}</td>
+            <td>{out.length ? out.map((u) => l.model.kind === "video" ? <video key={u} src={u} controls playsInline width={160} style={{ borderRadius: 6 }} /> : <img key={u} src={u} alt={l.label} width={120} style={{ borderRadius: 6 }} />)
+              : j && busy(j.status) ? <Chip s="generating" />
+              : j ? <><Chip s="failed" /> <small>{j.error}</small></>
+              : configured ? <form action={A.generateMotion} className="row"><input type="hidden" name="b" value={B} /><input type="hidden" name="project" value={projectId} /><input type="hidden" name="keys" value={l.key} /><input type="hidden" name="confirmed_total" value={l.estimate} /><input type="hidden" name="confirm" value="yes" /><button className="btn btn-line btn-sm">Make this · ${l.estimate.toFixed(2)}</button></form>
+              : <small className="muted">Planned</small>}</td></tr>); })}
+      </tbody></table></div>}
+      {configured && todo.length > 1 && <form action={A.generateMotion} className="row wrap" style={{ marginTop: 8 }}>
+        <input type="hidden" name="b" value={B} /><input type="hidden" name="project" value={projectId} /><input type="hidden" name="confirmed_total" value={todoTotal} />
+        {todo.map((l) => <input key={l.key} type="hidden" name="keys" value={l.key} />)}
+        <label className="row"><input type="checkbox" name="confirm" value="yes" required /> Spend up to ${todoTotal.toFixed(2)} from my media budget</label>
+        <button className="btn btn-lime">Make all {todo.length} · ${todoTotal.toFixed(2)}</button>
+      </form>}
+      <small className="muted">Each scene is made as its own clip from your real photos. Prices come from the rates set by Dall AI; failed or blocked generations aren&apos;t charged.</small>
+    </div>
   );
 }

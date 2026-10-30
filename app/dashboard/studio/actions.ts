@@ -10,7 +10,7 @@ import { QuotaError } from "@/lib/creative/budget";
 import { taskFor, chooseModel, type RoutableModel } from "@/lib/creative/router";
 import { runResearch, suggestAccounts, draftStrategy, draftCalendar, regenerateItem, draftProductionSpec, draftMotionPack } from "@/lib/creative/director";
 import { MotionBrief } from "@/lib/creative/motion";
-import { authorizeBatch, submitJob } from "@/lib/creative/jobs";
+import { authorizeBatch, authorizeMotion, submitJob } from "@/lib/creative/jobs";
 import { GatewayError } from "@/lib/ai/gateway";
 
 const go = (b: string | null, tab: string, q = "") => redirect(`/dashboard/studio?${b ? `b=${b}&` : ""}tab=${tab}${q ? `&${q}` : ""}`);
@@ -313,4 +313,18 @@ export async function approveMotionPack(formData: FormData) {
   if (!data?.length) go(brand!.id, "motion", `m=${id}&error=state`);
   revalidatePath("/dashboard/studio");
   go(brand!.id, "motion", `m=${id}&saved=motion_approved`);
+}
+
+/** Owner's explicit "make these for $X" on an approved motion plan: all lines, or one. */
+export async function generateMotion(formData: FormData) {
+  const { brand, d } = await own(formData);
+  const projectId = String(formData.get("project") ?? "");
+  const keys = formData.getAll("keys").map(String).filter(Boolean);
+  if (formData.get("confirm") !== "yes") go(brand?.id ?? null, "motion", `m=${projectId}&error=confirm`);
+  let jobs: string[] = [];
+  try { jobs = await authorizeMotion({ ...d, projectId, keys, confirmedTotal: Number(formData.get("confirmed_total")) }); }
+  catch (e) { go(brand?.id ?? null, "motion", `m=${projectId}&error=quota&why=${why(e)}`); }
+  after(async () => { for (const j of jobs) await submitJob(j); });
+  revalidatePath("/dashboard/studio");
+  go(brand!.id, "motion", `m=${projectId}&saved=generating&n=${jobs.length}`);
 }

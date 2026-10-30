@@ -198,3 +198,28 @@ test("motion video: brief prefills from the profile, asks for what's missing, an
   assert.equal(out.storyboard.scenes[1].source_photo, ""); assert.equal(out.storyboard.scenes[2].end, 15); assert.equal(out.storyboard.duration, 15);
   assert.ok(out.needs_from_owner.some((n) => n.includes("no matching photo")));
 });
+
+test("motion generation: photo scenes animate the real photo, graphics scenes use text-to-video, prices add up", async () => {
+  const { planMotionGeneration, totalOf } = await import("../lib/creative/motion-gen.ts");
+  const { MotionPack } = await import("../lib/creative/motion.ts");
+  const m = (id: string, endpoint: string, kind: "image" | "video", tasks: string[], extra: object = {}) => ({ id, endpoint, name: endpoint, kind, unit: kind === "video" ? "second" as const : "image" as const, usd_per_unit: kind === "video" ? 0.1 : 0.05, max_seconds: kind === "video" ? 10 : null, allowed_params: ["prompt", "aspect_ratio", "duration"], enabled: true, tasks, ...extra });
+  const models = [m("e", "openai/gpt-image-2/edit", "image", ["photo_edit"], { image_param: "image_url" }), m("a", "kling-video/v4.0/image-to-video", "video", ["animate_photo"], { image_param: "image_url" }), m("t", "bytedance/seedance-2.0/text-to-video", "video", ["video_ad"])];
+  const pack = MotionPack.parse({
+    enhancements: [{ source_path: "p/1.jpg", direction: "warm grade", prompt: "grade it", keep_unchanged: "signage", crops: ["4:5"], rank: 1 }],
+    storyboard: { title: "Launch", duration: 15, aspect_ratio: "9:16", scenes: [
+      { beat: "hook", start: 0, end: 3, visual_objective: "o", shot: "s", camera: "slow push-in", motion: "words land one by one", prompt: "kinetic type", source_photo: "" },
+      { beat: "space", start: 3, end: 15, visual_objective: "o", shot: "s", camera: "dolly-in", prompt: "the new branch", source_photo: "p/1.jpg" },
+      { beat: "cta", start: 15, end: 15, visual_objective: "o", shot: "s", camera: "drift", prompt: "logo", source_photo: "" },
+    ] },
+  });
+  const { lines, problems } = planMotionGeneration(pack, models);
+  assert.deepEqual(problems, []);
+  assert.deepEqual(lines.map((l) => [l.key, l.task, l.model.id]), [["edit:0", "photo_edit", "e"], ["scene:0", "video_ad", "t"], ["scene:1", "animate_photo", "a"], ["scene:2", "video_ad", "t"]]);
+  assert.ok(lines[0].spec.prompt.includes("Keep exactly as in the photo: signage") && lines[0].spec.aspect_ratio === "4:5");
+  assert.ok(lines[1].spec.prompt.includes("Motion: words land one by one") && lines[1].spec.reference_asset_paths.length === 0);
+  assert.equal(lines[2].spec.duration_seconds, 10); // clamped to the model's max
+  assert.equal(lines[3].spec.duration_seconds, 2); // every clip is at least 2 seconds
+  assert.equal(totalOf(lines), Math.round((0.05 + 0.3 + 1 + 0.2) * 1e6) / 1e6);
+  const none = planMotionGeneration(pack, []);
+  assert.equal(none.lines.length, 0); assert.ok(none.problems[0].includes("no edit my photo model is enabled"));
+});
