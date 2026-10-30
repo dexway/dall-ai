@@ -6,7 +6,8 @@ import { requireWorkspace, canManage } from "@/lib/workspace";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatNaira } from "@/lib/money";
 import { GatewayError } from "@/lib/ai/gateway";
-import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal, suggestCompetitors, studyCompetitor } from "@/lib/harvey/agent";
+import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal, suggestCompetitors, studyCompetitor, loadHarvey } from "@/lib/harvey/agent";
+import { gatherAccount, Knowledge } from "@/lib/harvey/context";
 import { STAGES, STAGE_LABEL, domainOf, mailtoLink, whatsappLink, type Signal, type Person } from "@/lib/harvey/signals";
 import "./harvey.css";
 
@@ -38,6 +39,14 @@ async function saveSetup(f: FormData) {
   });
   revalidatePath("/dashboard/harvey");
   go("saved=setup");
+}
+
+async function learn() {
+  "use server";
+  const { a } = await manager();
+  run(() => loadHarvey(a, { retrain: true }));
+  revalidatePath("/dashboard/harvey");
+  go("saved=learning");
 }
 
 async function competitorAct(f: FormData) {
@@ -146,7 +155,7 @@ async function act(f: FormData) {
 type Research = { summary?: string; fit_reason?: string; angle?: string; decider?: { name: string; title: string; why: string }; risks?: string[]; signals?: Signal[]; people?: Person[]; pages?: { url: string; title: string }[] };
 
 const ERR: Record<string, string> = { role: "Only owners and admins can use Harvey.", notfound: "That prospect isn't in this business.", name: "Give the prospect a name.", dup: "That website is already in your pipeline.", save: "Couldn't save. Try again.", ai: "Harvey couldn't finish that", reply: "Paste the reply first." };
-const OK: Record<string, string> = { studying: "Harvey is studying that competitor: their site, prices and public reviews. Refresh in a minute.", setup: "Saved. Harvey sells with this from now on.", added: "Prospect added.", researching: "Prospect added. Harvey is reading their website; refresh in a minute.", working: "Harvey is on it. Refresh in a few seconds to see the result.", deleted: "Prospect removed.", "1": "Saved." };
+const OK: Record<string, string> = { learning: "Harvey is learning your business from what you've already told Dall AI. Refresh in a few seconds.", studying: "Harvey is studying that competitor: their site, prices and public reviews. Refresh in a minute.", setup: "Saved. Harvey sells with this from now on.", added: "Prospect added.", researching: "Prospect added. Harvey is reading their website; refresh in a minute.", working: "Harvey is on it. Refresh in a few seconds to see the result.", deleted: "Prospect removed.", "1": "Saved." };
 
 export default async function HarveyPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const ctx = await requireWorkspace();
@@ -169,7 +178,13 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
   const won = list.filter((p) => p.stage === "won").reduce((t, p) => t + Number(p.value_kobo ?? 0), 0);
   const due = open.filter((p) => p.next_at && Date.parse(p.next_at) <= Date.now() + 86_400_000);
   const sel = sp.p ? list.find((p) => p.id === sp.p) : null;
-  const ready = Boolean(s?.offer && s?.ideal_customers);
+  const k = Knowledge.safeParse(s?.knowledge ?? null).data ?? null;
+  const ready = Boolean(k);
+  const account = await gatherAccount(ws, ctx.user.email ?? null);
+  // First visit: Harvey learns the business from the account in the background (no questions asked).
+  if (!k && canManage(ctx) && sp.saved !== "learning") after(async () => { try { await loadHarvey({ workspaceId: ws, userId: ctx.user.id }); } catch (e) { console.error("[harvey] learn", (e as Error).message); } });
+  const factRows = Object.entries(account.facts).filter(([, v]) => v) as [string, { value: string; source: string }][];
+  const FACT: Record<string, string> = { business_type: "Business type", location: "Location", website: "Website", products: "What you sell", audience: "Your customers", problems: "Problems you solve", offers: "Main offers", differentiators: "Why customers pick you", voice: "Voice", languages: "Languages", restrictions: "Restrictions", never_claim: "Never claim", details: "Business details" };
 
   return (
     <div className="hv-page">
@@ -187,27 +202,52 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
         <div className="stat"><span>Follow-ups due</span><b>{due.length}</b></div>
       </div>
 
-      <details className="panel" open={!ready}>
-        <summary><b>{ready ? "What Harvey is selling" : "1 · Tell Harvey what to sell"}</b></summary>
-        <form action={saveSetup} className="hv-form">
-          <label className="field"><span>What you sell to these customers</span><textarea name="offer" rows={3} className="input" defaultValue={s?.offer} placeholder="Corporate event packages: conference hall for 50–300, catering, AV, rooms for out-of-town guests." required /></label>
-          <div className="hv-grid">
-            <label className="field"><span>Your niche</span><input name="niche" className="input" defaultValue={s?.niche} placeholder="Corporate event venues in Lekki and VI" /></label>
-            <label className="field"><span>Why customers pick you over competitors</span><input name="differentiators" className="input" defaultValue={s?.differentiators} placeholder="On-site parking for 200 cars, in-house caterer, 24h power" /></label>
-          </div>
-          <label className="field"><span>Ideal customers</span><input name="ideal_customers" className="input" defaultValue={s?.ideal_customers} placeholder="Corporate offices, banks, NGOs, event planners, embassies" required /></label>
-          <div className="hv-grid">
-            <label className="field"><span>Areas</span><input name="areas" className="input" defaultValue={s?.areas} placeholder="Lekki, Victoria Island, Ikoyi" /></label>
-            <label className="field"><span>Who usually decides</span><input name="deciders" className="input" defaultValue={s?.deciders} placeholder="Admin manager, HR, office manager" /></label>
-          </div>
-          <label className="field"><span>Proof you can mention (real results, clients, reviews)</span><textarea name="proof" rows={2} className="input" defaultValue={s?.proof} placeholder="Hosted Access Bank's 2025 retreat; 4.8★ on Google from 320 reviews" /></label>
-          <div className="hv-grid">
-            <label className="field"><span>Sign messages as</span><input name="sender_name" className="input" defaultValue={s?.sender_name} placeholder="Tola, Sales Manager" /></label>
-            <label className="field"><span>Follow up after (days)</span><input name="followup_days" type="number" min={1} max={21} className="input" defaultValue={s?.followup_days ?? 3} /></label>
-          </div>
-          <div><button className="btn btn-ink">Save</button></div>
-        </form>
-      </details>
+      <section className="panel">
+        <div className="hv-toolbar">
+          <div><h2>What Harvey knows about {account.name}</h2><small className="muted">Learned from what you've already given Dall AI. Nothing to fill in; correct anything below if it's off.</small></div>
+          <form action={learn}><button className="btn btn-line btn-sm">{k ? "Relearn" : "Learn now"}</button></form>
+        </div>
+        {!k ? <p className="muted">Harvey is learning your business from your sign-up, assistant, Content Creator, catalogue and website. Refresh in a few seconds.</p> : <div className="hv-know">
+          <div><b>Niche</b><p>{k.niche}</p></div>
+          <div><b>What you sell</b><p>{k.product_description}</p></div>
+          <div><b>Ideal customers</b><p>{k.icp.industries.join(", ")}</p></div>
+          <div><b>Who decides</b><p>{k.icp.titles.join(", ")}</p></div>
+          <div><b>Areas</b><p>{k.icp.geography.join(", ")}</p></div>
+          <div><b>Buying triggers</b><p>{k.icp.buying_triggers.join("; ")}</p></div>
+          <div><b>Offer</b><p>{k.offer.primary}{k.offer.entry ? ` · Easy first step: ${k.offer.entry}` : ""}</p></div>
+          <div><b>Why customers pick you</b><p>{k.competitive_intel.unique_strengths.join("; ") || "Not clear yet"}</p></div>
+          <div><b>Proof Harvey may mention</b><p>{k.social_proof.join("; ") || "None yet, so Harvey won't claim any"}</p></div>
+        </div>}
+        {k?.gaps.length ? <div className="notice"><b>Harvey would sell better if it knew:</b><ul>{k.gaps.map((g) => <li key={g}>{g}</li>)}</ul></div> : null}
+        <details>
+          <summary>Where this came from ({factRows.length} facts, {account.catalogue.length} catalogue items, {account.promotions.length} live promotions{account.websiteText ? ", your website" : ""})</summary>
+          <ul className="hv-sources">{factRows.map(([key, v]) => <li key={key}><b>{FACT[key] ?? key}</b> <small className="muted">from {v.source}</small><br /><small>{v.value.slice(0, 220)}</small></li>)}</ul>
+          {!account.facts.website && <p className="hyp">No website on record. Add it in Assistant studio or Content Creator so Harvey can learn more.</p>}
+          {!account.catalogue.length && <p className="hyp">Your catalogue is empty, so Harvey can't quote prices. Add items in Catalogue.</p>}
+        </details>
+        <details>
+          <summary>Correct Harvey (optional)</summary>
+          <form action={saveSetup} className="hv-form" style={{ marginTop: 8 }}>
+            <p className="muted" style={{ margin: 0 }}>Leave a box empty to keep what Harvey learned. What you type here always wins.</p>
+            <div className="hv-grid">
+              <label className="field"><span>Niche</span><input name="niche" className="input" defaultValue={s?.niche} placeholder={k?.niche} /></label>
+              <label className="field"><span>Why customers pick you</span><input name="differentiators" className="input" defaultValue={s?.differentiators} /></label>
+            </div>
+            <label className="field"><span>What you sell to these customers</span><textarea name="offer" rows={2} className="input" defaultValue={s?.offer} placeholder={k?.product_description} /></label>
+            <div className="hv-grid">
+              <label className="field"><span>Ideal customers</span><input name="ideal_customers" className="input" defaultValue={s?.ideal_customers} placeholder={k?.icp.industries.join(", ")} /></label>
+              <label className="field"><span>Who decides</span><input name="deciders" className="input" defaultValue={s?.deciders} placeholder={k?.icp.titles.join(", ")} /></label>
+              <label className="field"><span>Areas</span><input name="areas" className="input" defaultValue={s?.areas} placeholder={k?.icp.geography.join(", ")} /></label>
+            </div>
+            <label className="field"><span>Proof you can mention</span><input name="proof" className="input" defaultValue={s?.proof} /></label>
+            <div className="hv-grid">
+              <label className="field"><span>Sign messages as</span><input name="sender_name" className="input" defaultValue={s?.sender_name} placeholder={account.name} /></label>
+              <label className="field"><span>Follow up after (days)</span><input name="followup_days" type="number" min={1} max={21} className="input" defaultValue={s?.followup_days ?? 3} /></label>
+            </div>
+            <div><button className="btn btn-ink btn-sm">Save corrections</button></div>
+          </form>
+        </details>
+      </section>
 
       <section className="panel" id="competition">
         <div className="hv-toolbar">
@@ -247,7 +287,7 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
           <Link href="/dashboard/harvey" className={`pill ${!stage ? "on" : ""}`}>All open</Link>
           {STAGES.map((st) => { const n = list.filter((p) => p.stage === st).length; return <Link key={st} href={`/dashboard/harvey?stage=${st}`} className={`pill ${stage === st ? "on" : ""}`}>{STAGE_LABEL[st]} {n ? <small>{n}</small> : null}</Link>; })}
         </nav>
-        {!shown.length ? <p className="muted">{ready ? "No prospects here yet. Let Harvey find some, or add one you already know below." : "Tell Harvey what you sell first, then it can find prospects."}</p> : (
+        {!shown.length ? <p className="muted">{ready ? "No prospects here yet. Let Harvey find some, or add one you already know below." : "Harvey is still learning your business. Refresh in a few seconds."}</p> : (
           <div className="table-wrap"><table><thead><tr><th>Prospect</th><th>Stage</th><th className="num">Fit</th><th>Why now</th><th>Next step</th><th className="num">Value</th></tr></thead><tbody>
             {shown.map((p) => { const r = (p.research ?? {}) as Research; return (
               <tr key={p.id} className={sel?.id === p.id ? "hv-sel" : ""}>
@@ -297,6 +337,8 @@ async function Deal({ id, ws }: { id: string; ws: string }) {
         <span className={`hv-stage st-${p.stage}`}>{STAGE_LABEL[p.stage as keyof typeof STAGE_LABEL]}</span>
       </div>
       {p.error && <p className="hyp">Last attempt failed: {p.error}</p>}
+      {p.opted_out && <div className="notice notice-bad">They asked not to be contacted. Harvey will never write to them again.</div>}
+      {p.needs_human && <div className="notice notice-bad"><b>Needs you:</b> {p.needs_human} Harvey doesn&apos;t answer angry, legal or compliance replies.</div>}
 
       <div className="hv-cols">
         <div>
@@ -346,6 +388,7 @@ async function Deal({ id, ws }: { id: string; ws: string }) {
                 <header><b>{m.channel === "whatsapp" ? "WhatsApp" : "Email"}</b> · {m.kind}</header>
                 {m.subject && <p><small><b>Subject:</b> {m.subject}</small></p>}
                 <p className="hv-body">{m.body}</p>
+                {m.gate && !m.gate.ok && <p className="hyp">Check before sending: {(m.gate.reasons as string[]).join("; ")}</p>}
                 <div className="row wrap">
                   {link ? <a className="btn btn-lime btn-sm" href={link} target="_blank" rel="noopener noreferrer">{m.channel === "whatsapp" ? "Open in WhatsApp" : "Open in email"}</a> : <small className="hyp">No {m.channel === "whatsapp" ? "phone number" : "email address"} yet: add it in the deal or copy the text.</small>}
                   <form action={act}>{hidden("id", p.id)}{hidden("do", "sent")}{hidden("mid", m.id)}<button className="btn btn-ink btn-sm">I sent it</button></form>

@@ -34,3 +34,6 @@ tr.hv-sel td { background: rgba(200, 238, 114, .18); }
 .hv-rival p { margin: 0; }
 .hv-weak { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
 .hv-uses { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 99px; background: rgba(215, 122, 92, .16); color: #9a4a30; font-size: 11.5px; font-weight: 600; }
+.hv-know { display: grid; gap: 10px 18px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 6px 0 12px; }
+.hv-know p { margin: 2px 0 0; font-size: 14px; }
+.hv-sources { list-style: none; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
