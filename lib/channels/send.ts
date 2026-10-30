@@ -42,17 +42,25 @@ export async function sendText(a: SendArgs): Promise<{ providerMessageId: string
 }
 
 /** WhatsApp approved template (needed more than 24h after the customer's last message). */
-export async function sendTemplate(a: { token: string; phoneNumberId: string; to: string; name: string; language: string; fetcher?: typeof fetch }): Promise<{ providerMessageId: string | null }> {
+export async function sendTemplate(a: { token: string; phoneNumberId: string; to: string; name: string; language: string; params?: string[]; fetcher?: typeof fetch }): Promise<{ providerMessageId: string | null }> {
+  const components = a.params?.length ? [{ type: "body", parameters: a.params.map((text) => ({ type: "text", text })) }] : undefined;
   const r = await postWithRetry(`${graph()}/${a.phoneNumberId}/messages`, a.token, {
-    messaging_product: "whatsapp", to: a.to, type: "template", template: { name: a.name, language: { code: a.language } },
+    messaging_product: "whatsapp", to: a.to, type: "template", template: { name: a.name, language: { code: a.language }, ...(components ? { components } : {}) },
   }, a.fetcher);
   return { providerMessageId: (r.messages as { id?: string }[] | undefined)?.[0]?.id ?? null };
 }
 
+/** How many numbered {{n}} variables a template body has; null when it uses named variables (not supported). */
+export function templateVars(body: string): number | null {
+  const names = [...body.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((m) => m[1]);
+  if (names.some((n) => !/^\d+$/.test(n))) return null;
+  return names.reduce((max, n) => Math.max(max, Number(n)), 0);
+}
+
 /** Approved templates on a WhatsApp Business Account, for the inbox's template picker. */
-export async function listTemplates(token: string, wabaId: string, fetcher: typeof fetch = fetch): Promise<{ name: string; language: string; body: string }[]> {
+export async function listTemplates(token: string, wabaId: string, fetcher: typeof fetch = fetch): Promise<{ name: string; language: string; body: string; vars: number | null }[]> {
   const res = await fetcher(`${graph()}/${wabaId}/message_templates?status=APPROVED&limit=50&fields=name,language,components`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new SendError(`templates failed ${res.status}: ${(await res.text()).slice(0, 200)}`, res.status, false);
   const j = (await res.json()) as { data?: { name: string; language: string; components?: { type: string; text?: string }[] }[] };
-  return (j.data ?? []).map((t) => ({ name: t.name, language: t.language, body: t.components?.find((c) => c.type === "BODY")?.text ?? "" }));
+  return (j.data ?? []).map((t) => { const body = t.components?.find((c) => c.type === "BODY")?.text ?? ""; return { name: t.name, language: t.language, body, vars: templateVars(body) }; });
 }

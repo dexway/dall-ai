@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { supabaseUser } from "@/lib/supabase/server";
+import { supabaseUser, supabaseAdmin } from "@/lib/supabase/server";
 import { BRAND } from "@/lib/config";
 import "../(auth)/auth.css";
 
@@ -32,11 +32,14 @@ async function create(formData: FormData) {
   const db = await supabaseUser();
   const name = String(formData.get("name") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim().slice(0, 60) || "Other";
+  const website = String(formData.get("website") ?? "").trim().slice(0, 300);
   if (name.length < 2) redirect("/onboarding?error=name");
   const base = slugify(name);
   for (let i = 0; i < 5; i++) {
     const slug = i === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
-    const { error } = await db.rpc("create_workspace", { p_name: name, p_slug: slug.length < 3 ? `${slug}-biz` : slug, p_type: type });
+    const { data: wsId, error } = await db.rpc("create_workspace", { p_name: name, p_slug: slug.length < 3 ? `${slug}-biz` : slug, p_type: type });
+    // The website lets Dall AI prepare a launch video draft for them (offered in a dashboard pop-up).
+    if (!error && website && wsId) await supabaseAdmin().from("workspaces").update({ business_profile: { website } }).eq("id", wsId);
     if (!error) redirect(`/dashboard/agent?welcome=1&preset=${presetFor(type)}`);
     if (!String(error.message).includes("duplicate")) redirect("/onboarding?error=save");
   }
@@ -68,6 +71,8 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
               <datalist id="business-types">{TYPES.map(([t]) => <option key={t} value={t} />)}</datalist>
               <small style={{ color: "var(--ink-70)" }}>Any business works. We&apos;ll start you with the closest ready-made assistant, and you can change everything.</small>
             </label>
+            <label className="field"><span>Website or Instagram page (optional)</span><input name="website" className="input" maxLength={300} placeholder="yourshop.com" autoComplete="url" />
+              <small style={{ color: "var(--ink-70)" }}>We&apos;ll use it to prepare a launch video for your business.</small></label>
             <button className="btn btn-ink">Continue</button>
           </form>
           <p className="muted" style={{ fontSize: 14 }}>Free during early access.</p>

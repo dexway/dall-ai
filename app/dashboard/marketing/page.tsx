@@ -36,10 +36,15 @@ async function savePromo(formData: FormData) {
   const ends = String(formData.get("ends_at") ?? "");
   const items = formData.getAll("item_ids").map(String).filter(Boolean);
   if (code.length < 3 || !title || !(value > 0) || (kind === "percent" && value > 90)) back("error=promo");
+  // WhatsApp template for the announcement: "name|language|vars", or empty to skip WhatsApp.
+  const [tName, tLang, rawVars] = String(formData.get("announce_template") ?? "").split("|");
+  const tVars = Number(rawVars);
+  if (tName && (!tLang || !Number.isInteger(tVars) || tVars < 0 || tVars > 4)) back("error=template_vars");
   const { error } = await supabaseAdmin().from("promotions").insert({
     workspace_id: ctx.workspace.id, code, title, kind, value, min_order_kobo: min, max_uses: maxUses,
     ends_at: ends ? new Date(`${ends}T23:59:00+01:00`).toISOString() : null, item_ids: items.length ? items : null,
     announce: formData.get("announce") === "on", announce_message: String(formData.get("announce_message") ?? "").trim().slice(0, 600) || null,
+    announce_template_name: tName || null, announce_template_language: tName ? tLang : null, announce_template_vars: tName ? tVars : 0,
   });
   if (error) back(error.code === "23505" ? "error=promo_dup" : "error=save");
   revalidatePath("/dashboard/marketing");
@@ -133,19 +138,19 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
   ]);
   const channel = CH[sp.bc ?? ""] ? sp.bc! : "whatsapp";
   const audience = await audienceFor(ws, channel);
-  let templates: { name: string; language: string; body: string }[] = [];
+  // WhatsApp templates feed both the broadcast picker and the deal announcement picker.
+  let templates: { name: string; language: string; body: string; vars: number | null }[] = [];
   let templateNote = "";
-  if (channel === "whatsapp") {
-    const conn = await connectionFor(ws, "whatsapp");
-    if (!conn) templateNote = "Connect WhatsApp on Channels first.";
-    else if (!conn.waba_id) templateNote = "Reconnect WhatsApp so Dall AI can load your approved templates.";
-    else { try { templates = await listTemplates(decryptSecret(conn.access_token_enc), conn.waba_id); } catch (e) { templateNote = `Couldn't load templates: ${(e as Error).message.slice(0, 120)}`; } }
-  }
+  const waConn = await connectionFor(ws, "whatsapp");
+  if (!waConn) templateNote = "Connect WhatsApp on Channels first.";
+  else if (!waConn.waba_id) templateNote = "Reconnect WhatsApp so Dall AI can load your approved templates.";
+  else { try { templates = await listTemplates(decryptSecret(waConn.access_token_enc), waConn.waba_id); } catch (e) { templateNote = `Couldn't load templates: ${(e as Error).message.slice(0, 120)}`; } }
+  const dealTemplates = templates.filter((t) => t.vars !== null && t.vars <= 4);
   let copy: CopyPack | null = null;
   try { copy = sp.copy ? JSON.parse(Buffer.from(sp.copy, "base64url").toString()) as CopyPack : null; } catch { copy = null; }
   const livePromos = ((promos ?? []) as Promo[]).filter((p) => !promoUnavailable(p));
 
-  const errors: Record<string, string> = { role: "Only owners and admins can change marketing.", promo: "Give the promotion a code (3+ letters), a title and a value (percent up to 90).", promo_dup: "That code already exists.", save: "Couldn't save. Try again.", broadcast: "Pick a template (WhatsApp) or write a message of at least 5 characters.", confirm: "Tick the box to confirm sending.", audience: "Nobody on this channel can receive a broadcast yet.", copy: "Couldn't write copy" };
+  const errors: Record<string, string> = { role: "Only owners and admins can change marketing.", promo: "Give the promotion a code (3+ letters), a title and a value (percent up to 90).", promo_dup: "That code already exists.", save: "Couldn't save. Try again.", broadcast: "Pick a template (WhatsApp) or write a message of at least 5 characters.", confirm: "Tick the box to confirm sending.", audience: "Nobody on this channel can receive a broadcast yet.", copy: "Couldn't write copy", template_vars: "That WhatsApp template can't be used for deals. Pick one with up to 4 numbered variables ({{1}} to {{4}})." };
   const saved: Record<string, string> = { promo: "Promotion saved. Your assistant can offer it from the next message.", followups: "Follow-up settings saved.", broadcast: "Broadcast is sending. Results update below as messages go out.", "1": "Saved." };
 
   return (
@@ -213,7 +218,12 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
           <label className="field"><span>Ends</span><input name="ends_at" type="date" className="input" /></label>
           <label className="field"><span>Only these items</span><select name="item_ids" multiple className="input" style={{ minHeight: 70 }}>{(items ?? []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select></label>
           <label style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "flex-start", fontSize: 14 }}><input type="checkbox" name="announce" defaultChecked style={{ marginTop: 3 }} />
-            <span><b>Announce this deal automatically</b><br /><small style={{ color: "var(--ink-70)" }}>Within 5 minutes, your assistant messages customers who agreed to offers on Instagram and Messenger (people who chatted in the last 24 hours, Meta&apos;s rule). Everyone can reply STOP.</small></span></label>
+            <span><b>Announce this deal automatically</b><br /><small style={{ color: "var(--ink-70)" }}>Within 5 minutes, your assistant messages customers who agreed to offers on Instagram and Messenger (people who chatted in the last 24 hours, Meta&apos;s rule), and on WhatsApp if you pick a template below. Everyone can reply STOP.</small></span></label>
+          <label className="field" style={{ gridColumn: "1 / -1" }}><span>WhatsApp template (optional)</span>
+            {templateNote ? <small className="muted">{templateNote}</small> : !dealTemplates.length ? <small className="muted">No approved templates yet. Create one in WhatsApp Manager → Message templates (Marketing category), then reload.</small> : <>
+              <select name="announce_template" className="input"><option value="">Don&apos;t send on WhatsApp</option>{dealTemplates.map((t) => <option key={t.name + t.language} value={`${t.name}|${t.language}|${t.vars}`}>{t.name} ({t.language}): {t.body.slice(0, 70)}</option>)}</select>
+              <small className="muted">Sent to WhatsApp customers who agreed to offers, any time. We fill {"{{1}}"} deal title, {"{{2}}"} offer (e.g. 10% off), {"{{3}}"} code, {"{{4}}"} end date. Include &quot;Reply STOP to stop offers&quot; in the template.</small></>}
+          </label>
           <label className="field" style={{ gridColumn: "1 / -1" }}><span>Announcement (optional)</span><input name="announce_message" className="input" placeholder="Leave empty and we'll write: New deal: Weekend party deal. 10% off with code JOLLOF10. Reply here to order!" /></label>
           <div style={{ alignSelf: "end" }}><button className="btn btn-ink">Add promotion</button></div>
         </form>
@@ -243,7 +253,7 @@ export default async function MarketingPage({ searchParams }: { searchParams: Pr
           <input type="hidden" name="channel" value={channel} />
           <label className="field"><span>Name (for you)</span><input name="title" className="input" placeholder="Weekend promo" /></label>
           {channel === "whatsapp" ? (templateNote ? <p className="muted">{templateNote}</p> :
-            <label className="field"><span>Approved template</span><select name="template" className="input">{templates.map((t) => <option key={t.name + t.language} value={`${t.name}|${t.language}`}>{t.name} ({t.language}): {t.body.slice(0, 70)}</option>)}</select></label>)
+            <label className="field"><span>Approved template</span><select name="template" className="input">{templates.filter((t) => t.vars === 0).map((t) => <option key={t.name + t.language} value={`${t.name}|${t.language}`}>{t.name} ({t.language}): {t.body.slice(0, 70)}</option>)}</select></label>)
             : <label className="field"><span>Message</span><textarea name="message" rows={4} maxLength={1000} className="input" defaultValue={sp.msg ?? ""} /></label>}
           <label style={{ display: "flex", gap: 8, fontSize: 13 }}><input type="checkbox" name="confirm" value="yes" required /> Send to {audience.eligible.length} customer(s) now</label>
           <div><button className="btn btn-lime" disabled={!audience.eligible.length}>Send broadcast</button></div>

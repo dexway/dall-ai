@@ -131,7 +131,7 @@ export async function sendBroadcast(broadcastId: string, budgetMs = 50_000): Pro
     let status: "sent" | "failed" = "sent", error: string | null = null, pid: string | null = null;
     if (b.channel === "whatsapp") {
       try {
-        pid = (await sendTemplate({ token: decryptSecret(conn.access_token_enc), phoneNumberId: conn.external_id, to: conv.external_ref!, name: b.template_name!, language: b.template_language! })).providerMessageId;
+        pid = (await sendTemplate({ token: decryptSecret(conn.access_token_enc), phoneNumberId: conn.external_id, to: conv.external_ref!, name: b.template_name!, language: b.template_language!, params: b.template_params ?? undefined })).providerMessageId;
         await db.from("messages").insert({ conversation_id: conv.id, workspace_id: b.workspace_id, role: "assistant", content: { text: `[Broadcast: ${b.title}]` }, delivery_status: "sent", provider_message_id: pid });
       } catch (e) { status = "failed"; error = (e as Error).message.slice(0, 300); }
     } else {

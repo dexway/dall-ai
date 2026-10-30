@@ -1,6 +1,7 @@
 import { requireWorkspace } from "@/lib/workspace";
 import { BRAND } from "@/lib/config";
 import SideNav from "./SideNav";
+import LaunchOffer from "./LaunchOffer";
 import "./dashboard.css";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <form action="/auth/signout" method="post"><button>Log out</button></form>
       </aside>
       <div className="main">{children}</div>
+      <LaunchOffer workspaceId={ctx.workspace.id} name={ctx.workspace.name} />
     </div>
   );
 }

@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/ads.test.ts tests/net-guard.test.ts tests/creative.test.ts tests/sql.test.mjs tests/isolation.test.mjs tests/budget.test.mjs"
+    "test": "node --test --experimental-strip-types tests/unit.test.ts tests/whatsapp.test.ts tests/early-pay.test.ts tests/meta.test.ts tests/ad-errors.test.ts tests/events.test.ts tests/ads.test.ts tests/net-guard.test.ts tests/creative.test.ts tests/sql.test.mjs tests/isolation.test.mjs tests/budget.test.mjs",
+    "higgsfield:example": "node --env-file=.env.local --experimental-strip-types scripts/higgsfield/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",
+    "@higgsfield/client": "^0.2.6",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.118.0",
     "mammoth": "^1.13.0",
