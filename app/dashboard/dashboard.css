@@ -106,11 +106,3 @@ details.add > summary::-webkit-details-marker { display: none; }
 .studio-side .panel h2 { font-size: 16px; }
 .studio-side .panel p { font-size: 13.5px; }
 @media (max-width: 900px) { .studio-grid { grid-template-columns: 1fr; gap: 20px; } .studio-form { padding: 20px; } }
-
-/* One-time launch video offer */
-.launch-offer { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(10, 20, 15, .55); }
-.launch-offer-card { width: min(520px, 100%); background: var(--white, #fff); color: var(--ink, #111); border-radius: 16px; padding: 24px; display: grid; gap: 10px; box-shadow: 0 20px 60px rgba(0, 0, 0, .25); }
-.launch-offer-card h2 { margin: 0; font-size: 1.35rem; }
-.launch-offer-card p { margin: 0; }
-.launch-offer-tag { justify-self: start; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; background: var(--lime, #d8f36a); color: #111; }
-.launch-offer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }

@@ -1,0 +1,82 @@
+/* Launch video offer: a dark brand card with a looping motion-graphics preview (6s loop, 3 beats). */
+.lo { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(10, 18, 15, .62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: lo-fade .35s ease-out both; }
+.lo-card { width: min(560px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: var(--ink); color: var(--mint); border: 1px solid var(--glass-line); border-radius: var(--r-lg); box-shadow: 0 30px 80px rgba(0, 0, 0, .45); animation: lo-rise .6s cubic-bezier(.2, 1.3, .35, 1) .05s both; }
+
+/* Stage */
+.lo-stage { position: relative; height: 230px; overflow: hidden; border-radius: var(--r-lg) var(--r-lg) 0 0; background: radial-gradient(120% 90% at 20% 10%, #2d4a40 0%, var(--forest) 45%, #0e1a16 100%); }
+.lo-grid { position: absolute; inset: -40px; background-image: linear-gradient(var(--glass) 1px, transparent 1px), linear-gradient(90deg, var(--glass) 1px, transparent 1px); background-size: 28px 28px; animation: lo-drift 12s linear infinite; }
+.lo-glow { position: absolute; width: 260px; height: 260px; right: -60px; top: -80px; border-radius: 50%; background: radial-gradient(circle, rgba(200, 238, 114, .35), transparent 65%); animation: lo-breathe 6s ease-in-out infinite; }
+.lo-scene { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; text-align: center; padding: 0 24px; opacity: 0; }
+.lo-s1 { animation: lo-beat1 6s infinite; }
+.lo-s2 { animation: lo-beat2 6s infinite; }
+.lo-s3 { animation: lo-beat3 6s infinite; }
+
+.lo-kicker { font: 600 11px/1 var(--f-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--lime); }
+.lo-kinetic { margin: 0; font: 800 clamp(30px, 7vw, 44px)/1.02 var(--f-display); color: var(--white); display: flex; flex-wrap: wrap; justify-content: center; gap: 0 .28em; }
+.lo-kinetic span { display: inline-block; animation: lo-word 6s cubic-bezier(.2, 1.4, .4, 1) infinite; }
+
+.lo-cards { position: relative; width: 210px; height: 120px; }
+.lo-cards i { position: absolute; width: 96px; height: 120px; top: 0; border-radius: 12px; background: linear-gradient(160deg, var(--mint) 0%, #b9c9b4 100%); box-shadow: 0 12px 30px rgba(0, 0, 0, .35); animation: lo-card 6s cubic-bezier(.2, 1.35, .35, 1) infinite; }
+.lo-cards i:nth-child(1) { left: 0; --r: -9deg; }
+.lo-cards i:nth-child(2) { left: 57px; --r: 0deg; background: linear-gradient(160deg, var(--lime), #a9d64f); z-index: 1; }
+.lo-cards i:nth-child(3) { left: 114px; --r: 9deg; }
+.lo-tag { position: absolute; top: 34px; right: calc(50% - 128px); padding: 4px 10px; border-radius: 99px; background: var(--coral); color: var(--white); font: 700 12px/1 var(--f-body); animation: lo-pop 6s cubic-bezier(.2, 1.6, .4, 1) infinite; }
+
+.lo-logo { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 18px; background: var(--lime); color: var(--ink); font: 800 32px/1 var(--f-display); animation: lo-logo 6s cubic-bezier(.2, 1.5, .35, 1) infinite; }
+.lo-cta { padding: 9px 16px; border-radius: 99px; border: 1px solid var(--glass-line); background: var(--glass-strong); color: var(--white); font: 600 14px/1 var(--f-body); animation: lo-cta 6s ease-out infinite; }
+
+.lo-hud { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; align-items: center; gap: 8px; font: 500 11px/1 var(--f-mono); color: var(--mint-70); }
+.lo-rec { width: 8px; height: 8px; border-radius: 50%; background: var(--coral); animation: lo-blink 1.2s steps(2) infinite; }
+.lo-bar { flex: 1; height: 3px; border-radius: 3px; background: var(--glass-line); overflow: hidden; }
+.lo-bar b { display: block; height: 100%; width: 100%; background: var(--lime); transform-origin: left; animation: lo-progress 6s linear infinite; }
+
+/* Body */
+.lo-body { padding: 22px 24px 20px; display: grid; gap: 12px; }
+.lo-body > * { animation: lo-up .5s cubic-bezier(.2, 1, .35, 1) both; }
+.lo-body > :nth-child(1) { animation-delay: .25s; } .lo-body > :nth-child(2) { animation-delay: .32s; } .lo-body > :nth-child(3) { animation-delay: .39s; }
+.lo-body > :nth-child(4) { animation-delay: .46s; } .lo-body > :nth-child(5) { animation-delay: .53s; } .lo-body > :nth-child(6) { animation-delay: .6s; }
+.lo-chip { justify-self: start; padding: 4px 11px; border-radius: 99px; background: rgba(200, 238, 114, .14); color: var(--lime); font: 600 12px/1.4 var(--f-body); }
+.lo-body h2 { margin: 0; font: 800 clamp(22px, 4.6vw, 28px)/1.12 var(--f-display); color: var(--white); text-wrap: balance; }
+.lo-body p { margin: 0; color: var(--mint-70); font-size: 15px; line-height: 1.55; }
+.lo-body p b { color: var(--white); font-weight: 600; }
+.lo-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; color: var(--mint); }
+.lo-points li { display: flex; gap: 10px; align-items: baseline; }
+.lo-points li::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--lime); transform: translateY(-1px) rotate(45deg); }
+.lo-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.lo-go { position: relative; overflow: hidden; }
+.lo-go span { transition: transform .2s ease; }
+.lo-go:hover span { transform: translateX(4px); }
+.lo-go::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .55) 50%, transparent 70%); transform: translateX(-120%); animation: lo-shine 3.2s ease-in-out 1.2s infinite; }
+.lo-later { color: var(--mint-45); font-size: 12.5px; }
+
+@media (max-width: 480px) {
+  .lo-stage { height: 190px; }
+  .lo-body { padding: 18px 18px 16px; }
+  .lo-actions .btn { flex: 1 1 100%; }
+}
+
+/* Keyframes. Beats: 0–33% hook, 33–66% the new thing, 66–100% logo + CTA. */
+@keyframes lo-fade { from { opacity: 0; } }
+@keyframes lo-rise { from { opacity: 0; transform: translateY(28px) scale(.94); } }
+@keyframes lo-up { from { opacity: 0; transform: translateY(10px); } }
+@keyframes lo-drift { to { transform: translate(28px, 28px); } }
+@keyframes lo-breathe { 50% { transform: scale(1.15); opacity: .8; } }
+@keyframes lo-beat1 { 0% { opacity: 0; } 3%, 30% { opacity: 1; } 34%, 100% { opacity: 0; } }
+@keyframes lo-beat2 { 0%, 32% { opacity: 0; } 36%, 63% { opacity: 1; } 67%, 100% { opacity: 0; } }
+@keyframes lo-beat3 { 0%, 65% { opacity: 0; } 69%, 97% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lo-word { 0%, 3% { opacity: 0; transform: translateY(60%) rotate(4deg); } 10%, 28% { opacity: 1; transform: none; } 33%, 100% { opacity: 0; transform: translateY(-30%); } }
+@keyframes lo-card { 0%, 34% { opacity: 0; transform: translateY(70px) rotate(0); } 44%, 62% { opacity: 1; transform: rotate(var(--r)); } 66%, 100% { opacity: 0; transform: translateY(-20px) rotate(var(--r)); } }
+@keyframes lo-pop { 0%, 44% { opacity: 0; transform: scale(.3) rotate(-12deg); } 50%, 62% { opacity: 1; transform: scale(1) rotate(-6deg); } 66%, 100% { opacity: 0; transform: scale(.8); } }
+@keyframes lo-logo { 0%, 67% { opacity: 0; transform: scale(.4) rotate(-20deg); } 75%, 95% { opacity: 1; transform: scale(1) rotate(0); } 100% { opacity: 0; } }
+@keyframes lo-cta { 0%, 72% { opacity: 0; transform: translateY(12px); } 80%, 95% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes lo-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes lo-blink { 50% { opacity: .2; } }
+@keyframes lo-shine { 0%, 60% { transform: translateX(-120%); } 85%, 100% { transform: translateX(120%); } }
+
+/* Calm version: no looping motion, the final frame stays put. */
+@media (prefers-reduced-motion: reduce) {
+  .lo, .lo-card, .lo-body > *, .lo-grid, .lo-glow, .lo-rec, .lo-go::after { animation: none !important; }
+  .lo-scene, .lo-scene *, .lo-bar b { animation: none !important; }
+  .lo-s1, .lo-s2 { opacity: 0; }
+  .lo-s3 { opacity: 1; }
+}
