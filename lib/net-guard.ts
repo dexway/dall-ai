@@ -63,8 +63,8 @@ const guarded = new Agent({
   },
 });
 
-/** Fetches a public web page's text: http(s) only, public IPs only, max 3 redirects, 10 s, 1.5 MB. */
-export async function fetchPublicPage(raw: string, maxBytes = 1_500_000): Promise<string> {
+/** Fetches a public URL's bytes: http(s) only, public IPs only, max 3 redirects, 10 s, capped size. */
+export async function fetchPublic(raw: string, maxBytes = 1_500_000): Promise<{ bytes: Buffer; contentType: string; url: string; truncated: boolean }> {
   let url = checkUrlShape(raw);
   for (let hop = 0; hop <= 3; hop++) {
     const res = await ufetch(url, { dispatcher: guarded, redirect: "manual", headers: { "User-Agent": "DallAI-bot/1.0" }, signal: AbortSignal.timeout(10_000) });
@@ -75,17 +75,23 @@ export async function fetchPublicPage(raw: string, maxBytes = 1_500_000): Promis
       continue;
     }
     if (!res.ok) throw new Error(`The site answered ${res.status}.`);
+    const contentType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     const reader = res.body?.getReader();
-    if (!reader) return "";
-    const chunks: Uint8Array[] = []; let size = 0;
+    if (!reader) return { bytes: Buffer.alloc(0), contentType, url: url.toString(), truncated: false };
+    const chunks: Uint8Array[] = []; let size = 0, truncated = false;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > maxBytes) { await reader.cancel(); break; }
+      if (size > maxBytes) { truncated = true; await reader.cancel(); break; }
       chunks.push(value);
     }
-    return Buffer.concat(chunks).toString("utf8");
+    return { bytes: Buffer.concat(chunks), contentType, url: url.toString(), truncated };
   }
   throw new Error("Too many redirects.");
+}
+
+/** Fetches a public web page's text: http(s) only, public IPs only, max 3 redirects, 10 s, 1.5 MB. */
+export async function fetchPublicPage(raw: string, maxBytes = 1_500_000): Promise<string> {
+  return (await fetchPublic(raw, maxBytes)).bytes.toString("utf8");
 }

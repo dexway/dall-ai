@@ -10,6 +10,7 @@ import { QuotaError } from "@/lib/creative/budget";
 import { taskFor, chooseModel, type RoutableModel } from "@/lib/creative/router";
 import { runResearch, suggestAccounts, draftStrategy, draftCalendar, regenerateItem, draftProductionSpec, draftMotionPack } from "@/lib/creative/director";
 import { MotionBrief } from "@/lib/creative/motion";
+import { importWebsite } from "@/lib/creative/site-import";
 import { authorizeBatch, authorizeMotion, submitJob } from "@/lib/creative/jobs";
 import { GatewayError } from "@/lib/ai/gateway";
 
@@ -327,4 +328,21 @@ export async function generateMotion(formData: FormData) {
   after(async () => { for (const j of jobs) await submitJob(j); });
   revalidatePath("/dashboard/studio");
   go(brand!.id, "motion", `m=${projectId}&saved=generating&n=${jobs.length}`);
+}
+
+/** Pulls text and photos from the brand's website in the background (public pages only). */
+export async function importSite(formData: FormData) {
+  const { brand } = await own(formData);
+  if (!brand) go(null, "motion", "error=brand");
+  const site = String(formData.get("website") ?? "").trim().slice(0, 300);
+  const db = supabaseAdmin();
+  if (site) {
+    const { data: cur } = await db.from("creative_brands").select("profile").eq("id", brand!.id).single();
+    const parsed = BrandProfile.safeParse({ ...(cur?.profile ?? {}), website: site });
+    if (parsed.success) await db.from("creative_brands").update({ profile: parsed.data }).eq("id", brand!.id);
+  }
+  await db.from("creative_brands").update({ site_import_error: null, site_imported_at: null }).eq("id", brand!.id);
+  after(async () => { try { await importWebsite(brand!.id); } catch { /* the error is saved on the brand and shown */ } });
+  revalidatePath("/dashboard/studio");
+  go(brand!.id, "motion", "saved=site_importing");
 }

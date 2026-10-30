@@ -9,7 +9,8 @@ export type Task =
   | "photo_edit"      // edit the owner's own photo (background, light, add props)
   | "animate_photo"   // turn a product photo into a short clip
   | "video_ad"        // text-to-video ad / reel
-  | "cinematic";      // high-end mood / hero visuals
+  | "cinematic"       // high-end mood / hero visuals
+  | "upscale_photo";  // sharpen a low-resolution photo without changing it
 
 export const TASKS: Record<Task, { label: string; kind: "image" | "video"; needsReference: boolean; why: string }> = {
   product_photo: { label: "Product photo", kind: "image", needsReference: true, why: "Keeps your real product and makes it look shot in a studio." },
@@ -19,6 +20,7 @@ export const TASKS: Record<Task, { label: string; kind: "image" | "video"; needs
   animate_photo: { label: "Animate a photo", kind: "video", needsReference: true, why: "Brings a still product shot to life for Reels and Status." },
   video_ad: { label: "Video ad / reel", kind: "video", needsReference: false, why: "Short vertical video with motion and sound." },
   cinematic: { label: "Cinematic hero", kind: "image", needsReference: false, why: "Dramatic, high-end visuals for launches." },
+  upscale_photo: { label: "Upscale photo", kind: "image", needsReference: true, why: "Makes small website photos sharp enough for video, without changing them." },
 };
 
 /** Recommended Higgsfield model paths per task, best first (Oct 2026 research). Admin must confirm path + price. */
@@ -28,8 +30,9 @@ export const RECOMMENDED: Record<Task, string[]> = {
   poster: ["openai/gpt-image-2", "marketing-studio/image"],
   photo_edit: ["openai/gpt-image-2/edit", "marketing-studio/image"],
   animate_photo: ["kling-video/v4.0/image-to-video", "bytedance/seedance-2.0/image-to-video", "minimax/h3/image-to-video"],
-  video_ad: ["bytedance/seedance-2.0/text-to-video", "kling-video/v4.0/text-to-video", "alibaba/wan-3.0-prime/text-to-video"],
+  video_ad: ["bytedance/seedance-2.5/text-to-video", "bytedance/seedance-2.0/text-to-video", "kling-video/v4.0/text-to-video", "alibaba/wan-3.0-prime/text-to-video"],
   cinematic: ["higgsfield-ai/cinema-studio/v2.5", "higgsfield-ai/soul/cinematic"],
+  upscale_photo: [], // an admin tags the upscaler model in /admin/creative; never falls back to a generative model
 };
 
 export type RoutableModel = { id: string; endpoint: string; kind: "image" | "video"; enabled: boolean; tasks?: string[] | null; quality_rank?: number | null; image_param?: string | null };

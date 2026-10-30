@@ -5,6 +5,7 @@ import { runDueFollowups, sendBroadcast } from "@/lib/marketing";
 import { pollCreativeJobs } from "@/lib/creative/jobs";
 import { runAutopilot } from "@/lib/autopilot";
 import { offerLaunchVideos } from "@/lib/creative/launch-offer";
+import { importPendingSites } from "@/lib/creative/site-import";
 
 export const maxDuration = 300;
 
@@ -34,5 +35,8 @@ export async function POST(req: Request) {
   // Businesses that just added their website get a launch video draft and a dashboard pop-up.
   let launchOffers = 0;
   try { launchOffers = await offerLaunchVideos(); } catch (e) { console.error("[cron] launch offers failed", (e as Error).message); }
-  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers });
+  // Pull text and photos from those businesses' websites so their launch video uses real content.
+  let sitesImported = 0;
+  try { sitesImported = await importPendingSites(); } catch (e) { console.error("[cron] site import failed", (e as Error).message); }
+  return NextResponse.json({ followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers, sitesImported });
 }

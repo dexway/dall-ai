@@ -17,7 +17,7 @@ const OBJECTIVES = ["awareness", "engagement", "leads", "bookings", "sales", "re
 const PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "whatsapp"];
 const STATUS_LABEL: Record<string, string> = { draft: "Draft", awaiting_approval: "Awaiting approval", approved: "Approved", rejected: "Rejected", revision_requested: "Revision requested", generation_queued: "Generation queued", generating: "Generating", generated: "Ready for review", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
 const ERR: Record<string, string> = { role: "Only owners and admins can change the Creative Director.", brand: "Pick or create a brand first.", brief: "Check the brief", asset: "Brand files must be PNG, JPG, WEBP or PDF under 4 MB.", account: "Add at least one account.", running: "Research is already running for this brand.", ai: "The Creative Director couldn't finish that", state: "That step isn't available right now", locked: "Approved items are locked. Request a revision to change them.", model: "Pick a model an admin has enabled.", confirm: "Tick the box to confirm the spend.", quota: "Generation blocked" };
-const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", motion: "Brief saved.", motion_drafting: "Your motion director is reviewing your photos and writing the storyboard. It takes 1–2 minutes; refresh to see it.", motion_approved: "Production pack approved.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
+const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", motion: "Brief saved.", site_importing: "Reading your website and copying its best photos. It takes about a minute; refresh to see them.", motion_drafting: "Your motion director is reviewing your photos and writing the storyboard. It takes 1–2 minutes; refresh to see it.", motion_approved: "Production pack approved.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
 
 function Chip({ s }: { s: string }) { return <span className={`chip st-${s}`}>{STATUS_LABEL[s] ?? s.replace(/_/g, " ")}</span>; }
 function Sources({ urls, map }: { urls: string[]; map: Map<string, string> }) {
@@ -333,7 +333,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
       {tab === "production" && <Production B={B} ws={ws} models={(models ?? []) as ModelRow[]} sp={sp} />}
       {tab === "usage" && <Usage ws={ws} B={B} userId={ctx.user.id} />}
       {tab === "autopilot" && <Autopilot B={B} ws={ws} />}
-      {tab === "motion" && <Motion B={B} ws={ws} name={full?.name ?? brand.name} profile={profile} assets={(full?.asset_paths ?? []) as string[]} sp={sp} />}
+      {tab === "motion" && <Motion B={B} ws={ws} name={full?.name ?? brand.name} profile={profile} assets={(full?.asset_paths ?? []) as string[]} sp={sp} site={full ? { content: full.site_content as SiteBlob | null, at: full.site_imported_at as string | null, error: full.site_import_error as string | null } : null} />}
     </>
   );
 }
@@ -470,7 +470,9 @@ async function Autopilot({ B, ws }: { B: string; ws: string }) {
 
 const BEAT: Record<string, string> = { hook: "Hook", problem: "Desire", space: "The space", payoff: "Payoff", cta: "Call to action" };
 
-async function Motion({ B, ws, name, profile, assets, sp }: { B: string; ws: string; name: string; profile: BrandProfile; assets: string[]; sp: Record<string, string | undefined> }) {
+type SiteBlob = { site: string; imported_at: string; pages: { url: string; title: string }[]; images: { path: string; alt: string; width: number | null; height: number | null; logo: boolean }[]; skipped: number };
+
+async function Motion({ B, ws, name, profile, assets, sp, site }: { B: string; ws: string; name: string; profile: BrandProfile; assets: string[]; sp: Record<string, string | undefined>; site: { content: SiteBlob | null; at: string | null; error: string | null } | null }) {
   const db = supabaseAdmin();
   const { data: projects } = await db.from("motion_projects").select("*").eq("brand_id", B).eq("workspace_id", ws).order("created_at", { ascending: false }).limit(5);
   const proj = (projects ?? []).find((p) => p.id === sp.m) ?? (projects ?? [])[0];
@@ -485,11 +487,30 @@ async function Motion({ B, ws, name, profile, assets, sp }: { B: string; ws: str
     (signed ?? []).forEach((x, i) => { if (x.signedUrl) thumbs.set(proj!.photos[i], x.signedUrl); });
   }
   const fname = (path: string) => path.split("/").pop()?.replace(/^\d+-/, "") ?? path;
+  const siteImgs = site?.content?.images ?? [];
+  const { data: siteSigned } = siteImgs.length ? await db.storage.from("creative-assets").createSignedUrls(siteImgs.map((i) => i.path), 3600) : { data: [] };
+  const importing = sp.saved === "site_importing" && !site?.at; // only right after the owner pressed Pull
   return (
     <section className="panel">
       <h2>Motion video</h2>
       <p className="muted">Your motion director builds launch videos in motion graphics from your logo, colours and real photos, or a video of your space from your own photos. It writes a scene-by-scene storyboard, the animation for every scene and the prompts to make it. Nothing is generated or charged here: you approve the plan first.</p>
       {questions.length > 0 && <div className="notice"><b>A few details make the video much better:</b><ul>{questions.map((q) => <li key={q}>{q}</li>)}</ul>{photos.length < 3 && <Link href={`/dashboard/studio?b=${B}&tab=brief&step=2`}>Upload photos →</Link>}</div>}
+      <div className="panel" style={{ marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0 }}>From your website</h3>
+        <p className="muted" style={{ marginTop: 0 }}>We read your site&apos;s key pages (home, about, menu, rooms, services, gallery…) and copy its best photos, so your video uses your real words, offers and pictures.</p>
+        <form action={A.importSite} className="row wrap">
+          <input type="hidden" name="b" value={B} />
+          <input name="website" className="input" style={{ flex: "1 1 260px" }} defaultValue={profile.website} placeholder="yourbusiness.com" />
+          <button className="btn btn-ink">{site?.content ? "Pull again" : "Pull from my website"}</button>
+        </form>
+        {importing && !site?.error && <p className="muted"><Chip s="generating" /> Reading your website…</p>}
+        {site?.error && <p className="hyp">Couldn&apos;t finish: {site.error}</p>}
+        {site?.content && <>
+          <p className="muted">Read {site.content.pages.length} page{site.content.pages.length === 1 ? "" : "s"} ({site.content.pages.map((p) => p.title || p.url).slice(0, 4).join(" · ")}) and saved {siteImgs.length} photo{siteImgs.length === 1 ? "" : "s"}{site.content.skipped ? ` (${site.content.skipped} too small or unreadable)` : ""}. Small photos can be upscaled when you make the video.</p>
+          <div className="row wrap" style={{ gap: 8 }}>{siteImgs.map((im, i) => siteSigned?.[i]?.signedUrl ? <figure key={im.path} style={{ margin: 0, width: 96 }}><img src={siteSigned[i].signedUrl} alt={im.alt || fname(im.path)} width={96} height={72} style={{ objectFit: "cover", borderRadius: 8, display: "block" }} /><figcaption style={{ fontSize: 11 }} className="muted">{im.logo ? "Logo" : im.width ? `${im.width}×${im.height}` : ""}{im.width && Math.min(im.width, im.height ?? 0) < 1080 && !im.logo ? " · upscale" : ""}</figcaption></figure> : null)}</div>
+        </>}
+      </div>
+
       <form action={A.saveMotionBrief} className="cd-form">
         <input type="hidden" name="b" value={B} />{proj && <input type="hidden" name="project" value={proj.id} />}
         <fieldset className="checks"><legend>Video type</legend>

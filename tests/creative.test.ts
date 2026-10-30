@@ -223,3 +223,52 @@ test("motion generation: photo scenes animate the real photo, graphics scenes us
   const none = planMotionGeneration(pack, []);
   assert.equal(none.lines.length, 0); assert.ok(none.problems[0].includes("no edit my photo model is enabled"));
 });
+
+test("website import: reads text, picks real photos, follows key pages, sizes images", async () => {
+  const { parsePage, pickImages, imageSize, bestFromSrcset, siteDigest } = await import("../lib/creative/site-parse.ts");
+  const html = `<html><head><title>Watercress Lekki</title><meta name="description" content="Boutique hotel by the lagoon">
+    <meta property="og:image" content="/img/hero.jpg"><script>var x="<p>ignore me</p>"</script></head><body>
+    <nav><a href="/about">About</a><a href="/rooms">Rooms</a><a href="https://other.com/x">x</a><a href="/brochure.pdf">pdf</a></nav>
+    <main><h1>Sunsets over the lagoon</h1><p>Twelve suites with private balconies and a rooftop pool, ten minutes from the expressway.</p>
+    <img src="/img/logo.png" alt="Watercress logo"><img src="/img/icon-arrow.png" alt=""><img src="/img/tiny.jpg" width="40" height="40">
+    <img srcset="/img/pool-480.jpg 480w, /img/pool-1600.jpg 1600w" alt="Rooftop pool" width="1600"><img data-src="/img/suite.webp" alt="Deluxe suite"></main></body></html>`;
+  const { page, images, links } = parsePage(html, "https://watercress.com/");
+  assert.equal(page.title, "Watercress Lekki"); assert.equal(page.description, "Boutique hotel by the lagoon");
+  assert.ok(page.text.includes("rooftop pool") && !page.text.includes("ignore me"));
+  assert.deepEqual(page.headings, ["Sunsets over the lagoon"]);
+  const urls = images.map((i) => i.url);
+  assert.ok(urls.includes("https://watercress.com/img/pool-1600.jpg") && urls.includes("https://watercress.com/img/suite.webp") && urls.includes("https://watercress.com/img/hero.jpg"));
+  assert.ok(!urls.some((u) => u.includes("icon-arrow") || u.includes("tiny")));
+  assert.deepEqual(links, ["https://watercress.com/about", "https://watercress.com/rooms"]);
+  const picked = pickImages(images, 3);
+  assert.equal(picked.length, 3); assert.ok(picked[0].logo); assert.equal(picked[1].url, "https://watercress.com/img/hero.jpg");
+  assert.equal(bestFromSrcset("a.jpg 1x, b.jpg 2x"), "b.jpg");
+  const png = Buffer.alloc(32); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(1920, 16); png.writeUInt32BE(1080, 20);
+  assert.deepEqual(imageSize(png), { width: 1920, height: 1080 });
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0, 0, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x02, 0xd0, 0x05, 0x00, 0, 0, 0]);
+  assert.deepEqual(imageSize(jpg), { width: 1280, height: 720 });
+  assert.equal(imageSize(Buffer.from("nope")), null);
+  assert.ok(siteDigest([page]).startsWith("## Watercress Lekki (https://watercress.com/)"));
+});
+
+test("motion: website content and photo facts reach the director, and small photos get upscale lines", async () => {
+  const { motionRequest, prefillMotionBrief, MotionPack, MOTION_SKILL } = await import("../lib/creative/motion.ts");
+  const { planMotionGeneration } = await import("../lib/creative/motion-gen.ts");
+  const brief = prefillMotionBrief({}, null, "Watercress");
+  const req = motionRequest({ name: "Watercress", brief, profile: {}, photos: ["w/b/site/1-pool.jpg"], info: { "w/b/site/1-pool.jpg": { source: "website", alt: "Rooftop pool", width: 640, height: 480 } }, site: "## Home\nTwelve suites" });
+  assert.ok(req.includes("Website content") && req.includes("Twelve suites") && req.includes('1. w/b/site/1-pool.jpg [website, 640x480, "Rooftop pool"]'));
+  assert.ok(MOTION_SKILL.includes('"upscale": true'));
+  const pack = MotionPack.parse({
+    assets: [{ path: "w/b/site/1-pool.jpg", area: "pool", role: "hero", upscale: true, assessment: "soft" }, { path: "w/b/site/2-x.jpg", role: "skip", upscale: true, assessment: "no" }],
+    storyboard: { title: "t", duration: 15, aspect_ratio: "9:16", scenes: ["hook", "space", "cta"].map((beat, i) => ({ beat, start: i * 5, end: i * 5 + 5, visual_objective: "o", shot: "s", camera: "c", prompt: "p", source_photo: "" })) },
+  });
+  const m = (id: string, tasks: string[], extra: object = {}) => ({ id, endpoint: id, name: id, kind: "image" as const, unit: "image" as const, usd_per_unit: 0.02, max_seconds: null, allowed_params: ["prompt"], enabled: true, tasks, ...extra });
+  const vid = { id: "v", endpoint: "bytedance/seedance-2.5/text-to-video", name: "v", kind: "video" as const, unit: "second" as const, usd_per_unit: 0.05, max_seconds: 30, allowed_params: ["prompt"], enabled: true, tasks: ["video_ad"] };
+  const noUpscaler = planMotionGeneration(pack, [m("edit", ["photo_edit"], { image_param: "image_url" }), vid]);
+  assert.ok(!noUpscaler.lines.some((l) => l.task === "upscale_photo")); // never falls back to a generative model
+  assert.ok(noUpscaler.problems.some((p) => p.includes("no upscaler model")));
+  const withUpscaler = planMotionGeneration(pack, [m("up", ["upscale_photo"], { image_param: "image_url" }), vid]);
+  const up = withUpscaler.lines.filter((l) => l.task === "upscale_photo");
+  assert.equal(up.length, 1); assert.equal(up[0].label, "Upscale pool"); assert.deepEqual(up[0].spec.reference_asset_paths, ["w/b/site/1-pool.jpg"]);
+  assert.equal(withUpscaler.lines.find((l) => l.key === "scene:0")?.model.endpoint, "bytedance/seedance-2.5/text-to-video");
+});
