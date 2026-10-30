@@ -94,3 +94,27 @@ test("harvey skills: Harvey's prompts and skills load per agent, placeholders fi
   assert.ok(sys.includes("autonomous AI sales agent at Watercress") && sys.includes("Your product: Event halls") && !/\{\{\s*company_name/.test(sys));
   assert.ok(fill("Hi {{first_name}} at {{unknown}}", {}).startsWith("Hi {{first_name}} at "));
 });
+
+test("harvey competitors from OpenStreetMap: category from business type, well-known first, never itself", async () => {
+  const { osmFilters, osmNoun, overpassQuery, rankPlaces, nominatimPlaces } = await import("../lib/harvey/osm.ts");
+  assert.equal(osmNoun("Hotel"), "hotel"); assert.equal(osmNoun("Boutique hotel & suites"), "hotel"); assert.equal(osmNoun("Hair salon"), "salon");
+  assert.equal(osmNoun("Software company"), ""); assert.deepEqual(osmFilters("Software company"), []);
+  assert.ok(overpassQuery(osmFilters("Hotel"), [6.4, 3.3, 6.5, 3.5]).includes('nwr["tourism"~"^(hotel|guest_house|apartment|motel)$"]["name"](6.4,3.3,6.5,3.5);'));
+  const ranked = rankPlaces([
+    { tags: { name: "Small Inn" } },
+    { tags: { name: "Federal Palace", wikidata: "Q1", website: "https://fp.ng" } },
+    { tags: { name: "Watercress Suites", website: "https://watercress.com" } },
+    { tags: { name: "Mid Hotel", website: "https://mid.ng", phone: "+234" } },
+    { tags: { name: "Federal Palace" } },
+  ], { name: "Watercress", domain: "watercress.com" });
+  assert.deepEqual(ranked.map((p) => p.name), ["Federal Palace", "Mid Hotel", "Small Inn"]);
+  // Nominatim: position in results counts, duplicate records merge (the website on the building record is kept).
+  const places = nominatimPlaces([[
+    { name: "Grand Hotel", category: "tourism", type: "hotel", importance: 0.001 },
+    { name: "Lagos", category: "boundary", type: "administrative" },
+    { name: "Eko Hotel", category: "tourism", type: "hotel", importance: 0.0001 },
+    { name: "Eko Hotel", category: "building", type: "hotel", extratags: { website: "https://www.ekohotels.com/" } },
+  ]], { name: "Watercress", domain: null });
+  assert.deepEqual(places.map((p) => p.name), ["Eko Hotel", "Grand Hotel"]);
+  assert.equal(places[0].website, "https://www.ekohotels.com/");
+});

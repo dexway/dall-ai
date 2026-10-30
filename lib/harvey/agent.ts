@@ -10,6 +10,7 @@ import { detectSignals, extractContacts, profileLinks, domainOf, mergeSignals, f
 import { HARVEY_PROMPTS, skillsFor, fill } from "@/lib/harvey/harvey-skills";
 import { checkDraft, dncMatch, dncDomainMatch, INTENTS, NO_REPLY, type Intent } from "@/lib/harvey/gate";
 import { gatherAccount, trainHarvey, withOverrides, doNotContact, Knowledge, type Account } from "@/lib/harvey/context";
+import { findCompetitorsOsm } from "@/lib/harvey/osm";
 
 /**
  * Harvey (github.com/ethanplusai/harvey, MIT) running inside Dall AI for one business at a time.
@@ -55,14 +56,20 @@ export async function loadHarvey(ctx: Ctx, opts: { retrain?: boolean; ownerEmail
   ]);
   let k = Knowledge.safeParse(s?.knowledge ?? null).data;
   if (!k || opts.retrain || !s?.knowledge_at || Date.now() - Date.parse(s.knowledge_at) > KNOWLEDGE_TTL) {
-    k = await trainHarvey(ctx, account);
-    await db.from("harvey_settings").upsert({ workspace_id: ctx.workspaceId, knowledge: k, knowledge_at: new Date().toISOString() });
+    const now = new Date().toISOString();
+    try {
+      k = await trainHarvey(ctx, account);
+      await db.from("harvey_settings").upsert({ workspace_id: ctx.workspaceId, knowledge: k, knowledge_at: now, learn_error: null, learn_tried_at: now });
+    } catch (e) {
+      await db.from("harvey_settings").upsert({ workspace_id: ctx.workspaceId, learn_error: (e as Error).message.slice(0, 300), learn_tried_at: now });
+      if (!k) throw e; // no older knowledge to fall back on
+    }
   }
   let { data: competitors } = await db.from("harvey_competitors").select("id,name,website,domain,aliases,intel,status").eq("workspace_id", ctx.workspaceId).order("created_at");
   const known = [...account.competitors, ...k.competitive_intel.competitors.map((c) => ({ name: c.name, url: null, source: "Harvey", note: "" }))];
   const missing = known.filter((c) => !(competitors ?? []).some((x) => x.name.toLowerCase() === c.name.toLowerCase())).slice(0, 10);
   if (missing.length) {
-    await db.from("harvey_competitors").upsert(missing.map((c) => { const d = domainOf(c.url); return { workspace_id: ctx.workspaceId, name: c.name.slice(0, 120), website: d ? `https://${d}` : null, domain: d }; }), { onConflict: "workspace_id,name", ignoreDuplicates: true });
+    await db.from("harvey_competitors").upsert(missing.map((c) => { const d = domainOf(c.url); return { workspace_id: ctx.workspaceId, name: c.name.slice(0, 120), website: d ? `https://${d}` : null, domain: d, source: c.source === "Harvey" ? "ai" : "dall-ai" }; }), { onConflict: "workspace_id,name", ignoreDuplicates: true });
     ({ data: competitors } = await db.from("harvey_competitors").select("id,name,website,domain,aliases,intel,status").eq("workspace_id", ctx.workspaceId).order("created_at"));
   }
   const rows = (competitors ?? []) as CompetitorRow[];
@@ -346,7 +353,7 @@ export async function suggestCompetitors(ctx: Ctx): Promise<number> {
   const have = new Set(h.competitors.map((c) => c.name.toLowerCase()));
   const rows = r.value.competitors.map((c) => ({ ...c, domain: domainOf(c.website) }))
     .filter((c) => !have.has(c.name.toLowerCase()) && (c.domain ? seen.has(c.domain) : c.sources.some((u) => seen.has(domainOf(u) ?? ""))))
-    .map((c) => ({ workspace_id: ctx.workspaceId, name: c.name, website: c.domain ? `https://${c.domain}` : null, domain: c.domain }));
+    .map((c) => ({ workspace_id: ctx.workspaceId, name: c.name, website: c.domain ? `https://${c.domain}` : null, domain: c.domain, source: "ai" }));
   if (!rows.length) return 0;
   const { data } = await db.from("harvey_competitors").upsert(rows, { onConflict: "workspace_id,name", ignoreDuplicates: true }).select("id");
   return data?.length ?? rows.length;
@@ -428,4 +435,60 @@ export async function runHarveyFollowups(limit = 5): Promise<number> {
     catch (e) { await db.from("harvey_prospects").update({ error: (e as Error).message.slice(0, 300) }).eq("id", d.id); }
   }
   return drafted;
+}
+
+// ---------------------------------------------------------------- automatic competition (no AI)
+/**
+ * Lists the obvious competitors without being asked and without AI: the competitors Dall AI already
+ * knows, plus the same kind of business in the same area from OpenStreetMap (well-known ones first),
+ * then reads each one's home page for free so the owner sees what they offer straight away.
+ */
+export async function listCompetitors(workspaceId: string, opts: { force?: boolean; limit?: number } = {}): Promise<number> {
+  const db = supabaseAdmin();
+  const { data: s } = await db.from("harvey_settings").select("competitors_listed_at").eq("workspace_id", workspaceId).maybeSingle();
+  if (!opts.force && s?.competitors_listed_at) return 0;
+  await db.from("harvey_settings").upsert({ workspace_id: workspaceId, competitors_listed_at: new Date().toISOString() });
+  const account = await gatherAccount(workspaceId);
+  const own = domainOf(account.facts.website?.value);
+  const type = account.facts.business_type?.value ?? "";
+  const area = account.facts.location?.value?.split(/[.;\n]/)[0] ?? "Lagos";
+  const rows: { workspace_id: string; name: string; website: string | null; domain: string | null; source: string; phone?: string | null; area?: string | null }[] =
+    account.competitors.map((c) => { const d = domainOf(c.url); return { workspace_id: workspaceId, name: c.name.slice(0, 120), website: d ? `https://${d}` : null, domain: d, source: "dall-ai" }; });
+  try {
+    for (const p of await findCompetitorsOsm({ businessType: type, area, name: account.name, domain: own }, opts.limit ?? 12)) {
+      const d = domainOf(p.website);
+      if (d && d === own) continue;
+      rows.push({ workspace_id: workspaceId, name: p.name.slice(0, 120), website: d ? `https://${d}` : null, domain: d, source: "openstreetmap", phone: p.phone, area: p.area || null });
+    }
+  } catch (e) { console.error("[harvey] competitor listing", (e as Error).message); }
+  if (!rows.length) return 0;
+  const { data: added } = await db.from("harvey_competitors").upsert(rows, { onConflict: "workspace_id,name", ignoreDuplicates: true }).select("id,website");
+  // Free first look: their own home page title and description, until Harvey studies them properly.
+  for (const c of (added ?? []).filter((x) => x.website).slice(0, 12)) {
+    try {
+      const r = await fetchPublic(c.website!, 800_000);
+      if (!r.contentType.includes("html")) continue;
+      const { page } = parsePage(r.bytes.toString("utf8"), r.url);
+      const offer = [page.description, page.headings.slice(0, 3).join(" · ")].filter(Boolean).join(" ").slice(0, 400);
+      if (offer) await db.from("harvey_competitors").update({ intel: { offer, sources: [r.url], preview: true } }).eq("id", c.id).is("intel", null);
+    } catch { /* unreachable site: Harvey studies it later */ }
+  }
+  return added?.length ?? 0;
+}
+
+/** Scheduler: list competitors for new Harvey users, then study the not-yet-studied ones (AI) a few per run. */
+export async function runHarveyCompetition(limit = 2): Promise<number> {
+  const db = supabaseAdmin();
+  const { data: fresh } = await db.from("harvey_settings").select("workspace_id").is("competitors_listed_at", null).limit(3);
+  for (const s of fresh ?? []) await listCompetitors(s.workspace_id);
+  const { data: todo } = await db.from("harvey_competitors").select("id,workspace_id").eq("status", "new").order("created_at").limit(limit);
+  let studied = 0;
+  for (const c of todo ?? []) {
+    const { data: s } = await db.from("harvey_settings").select("knowledge,updated_by").eq("workspace_id", c.workspace_id).maybeSingle();
+    const { data: ws } = s?.updated_by ? { data: null } : await db.from("workspaces").select("created_by").eq("id", c.workspace_id).single();
+    const user = s?.updated_by ?? ws?.created_by;
+    if (!s?.knowledge || !user) continue; // Harvey must know the business first
+    try { await studyCompetitor({ workspaceId: c.workspace_id, userId: user }, c.id); studied++; } catch { /* error saved on the competitor */ }
+  }
+  return studied;
 }

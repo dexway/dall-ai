@@ -6,7 +6,7 @@ import { requireWorkspace, canManage } from "@/lib/workspace";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { formatNaira } from "@/lib/money";
 import { GatewayError } from "@/lib/ai/gateway";
-import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal, suggestCompetitors, studyCompetitor, loadHarvey } from "@/lib/harvey/agent";
+import { discoverProspects, researchProspect, draftOutreach, handleReply, draftProposal, suggestCompetitors, studyCompetitor, loadHarvey, listCompetitors } from "@/lib/harvey/agent";
 import { gatherAccount, Knowledge } from "@/lib/harvey/context";
 import { STAGES, STAGE_LABEL, domainOf, mailtoLink, whatsappLink, type Signal, type Person } from "@/lib/harvey/signals";
 import "./harvey.css";
@@ -59,6 +59,11 @@ async function competitorAct(f: FormData) {
     try { n = await suggestCompetitors(a); } catch (e) { go(`error=ai&why=${why(e)}#competition`); }
     revalidatePath("/dashboard/harvey");
     go(`saved=suggested&n=${n}#competition`);
+  }
+  if (what === "relist") {
+    await listCompetitors(ctx.workspace.id, { force: true });
+    revalidatePath("/dashboard/harvey");
+    go("saved=1#competition");
   }
   if (what === "add") {
     const name = String(f.get("name") ?? "").trim().slice(0, 120);
@@ -181,8 +186,14 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
   const k = Knowledge.safeParse(s?.knowledge ?? null).data ?? null;
   const ready = Boolean(k);
   const account = await gatherAccount(ws, ctx.user.email ?? null);
-  // First visit: Harvey learns the business from the account in the background (no questions asked).
-  if (!k && canManage(ctx) && sp.saved !== "learning") after(async () => { try { await loadHarvey({ workspaceId: ws, userId: ctx.user.id }); } catch (e) { console.error("[harvey] learn", (e as Error).message); } });
+  // First visit: list competitors (free, no AI) and learn the business from the account, in the
+  // background, without asking anything. A failed attempt is retried at most every 10 minutes.
+  const triedRecently = s?.learn_tried_at && Date.now() - Date.parse(s.learn_tried_at) < 10 * 60_000;
+  if (canManage(ctx)) after(async () => {
+    try { if (!s?.competitors_listed_at) await listCompetitors(ws); } catch (e) { console.error("[harvey] list", (e as Error).message); }
+    try { if (!k && !triedRecently && sp.saved !== "learning") await loadHarvey({ workspaceId: ws, userId: ctx.user.id }); } catch (e) { console.error("[harvey] learn", (e as Error).message); }
+  });
+  const learnFailed = !k && Boolean(s?.learn_error);
   const factRows = Object.entries(account.facts).filter(([, v]) => v) as [string, { value: string; source: string }][];
   const FACT: Record<string, string> = { business_type: "Business type", location: "Location", website: "Website", products: "What you sell", audience: "Your customers", problems: "Problems you solve", offers: "Main offers", differentiators: "Why customers pick you", voice: "Voice", languages: "Languages", restrictions: "Restrictions", never_claim: "Never claim", details: "Business details" };
 
@@ -207,7 +218,9 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
           <div><h2>What Harvey knows about {account.name}</h2><small className="muted">Learned from what you've already given Dall AI. Nothing to fill in; correct anything below if it's off.</small></div>
           <form action={learn}><button className="btn btn-line btn-sm">{k ? "Relearn" : "Learn now"}</button></form>
         </div>
-        {!k ? <p className="muted">Harvey is learning your business from your sign-up, assistant, Content Creator, catalogue and website. Refresh in a few seconds.</p> : <div className="hv-know">
+        {!k ? (learnFailed
+          ? <div className="notice notice-bad">Harvey couldn&apos;t reach its AI to learn your business ({s?.learn_error}). This is on Dall AI&apos;s side, not yours: it retries automatically, and your competitors are still listed below.</div>
+          : <p className="muted">Harvey is learning your business from your sign-up, assistant, Content Creator, catalogue and website. Refresh in a few seconds.</p>) : <div className="hv-know">
           <div><b>Niche</b><p>{k.niche}</p></div>
           <div><b>What you sell</b><p>{k.product_description}</p></div>
           <div><b>Ideal customers</b><p>{k.icp.industries.join(", ")}</p></div>
@@ -252,14 +265,18 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
       <section className="panel" id="competition">
         <div className="hv-toolbar">
           <div><h2>Your competition</h2><small className="muted">Harvey studies each competitor, spots prospects already working with them, and writes honest reasons to switch.</small></div>
-          <form action={competitorAct}><input type="hidden" name="do" value="suggest" /><button className="btn btn-line" disabled={!ready}>Suggest competitors</button></form>
+          <div className="row">
+            <form action={competitorAct}><input type="hidden" name="do" value="relist" /><button className="btn btn-line btn-sm">Refresh list</button></form>
+            <form action={competitorAct}><input type="hidden" name="do" value="suggest" /><button className="btn btn-line btn-sm" disabled={!ready}>Find more with AI</button></form>
+          </div>
         </div>
-        {!(competitors ?? []).length ? <p className="muted">No competitors yet. Let Harvey suggest them for your niche, or add the ones you know.</p> : (
+        {!(competitors ?? []).length ? <p className="muted">{s?.competitors_listed_at ? "Harvey couldn't find competitors on the map for your business type. Add the ones you know below." : "Harvey is listing your competitors. Refresh in a few seconds."}</p> : (
           <div className="hv-rivals">{(competitors ?? []).map((c) => { const i = (c.intel ?? {}) as { offer?: string; positioning?: string; prices?: { item: string; price: string }[]; weaknesses?: { point: string; source: string }[]; clients?: string[]; switch_angle?: string }; const n = list.filter((p) => p.competitor_id === c.id).length; return (
             <article key={c.id} className="hv-rival">
-              <header><b>{c.name}</b>{c.domain && <> · <a href={c.website ?? "#"} target="_blank" rel="noopener noreferrer"><small>{c.domain}</small></a></>}<span className={`hv-stage st-${c.status === "ready" ? "won" : c.status === "failed" ? "lost" : "contacted"}`}>{c.status === "ready" ? "Studied" : c.status === "studying" ? "Studying…" : c.status === "failed" ? "Failed" : "Not studied"}</span></header>
+              <header><b>{c.name}</b>{c.domain && <> · <a href={c.website ?? "#"} target="_blank" rel="noopener noreferrer"><small>{c.domain}</small></a></>}<span className={`hv-stage st-${c.status === "ready" ? "won" : c.status === "failed" ? "lost" : "contacted"}`}>{c.status === "ready" ? "Studied" : c.status === "studying" ? "Studying…" : c.status === "failed" ? "Study failed" : "Queued for study"}</span></header>
+              <small className="muted">{c.source === "openstreetmap" ? `Found nearby on OpenStreetMap${c.area ? ` · ${c.area}` : ""}` : c.source === "dall-ai" ? "From your Content Creator" : c.source === "ai" ? "Found by Harvey" : "Added by you"}{c.phone ? ` · ${c.phone}` : ""}</small>
               {c.error && <small className="hyp">{c.error}</small>}
-              {i.offer && <p><small>{i.offer}</small></p>}
+              {i.offer && <p><small>{(i as { preview?: boolean }).preview ? "From their website: " : ""}{i.offer}</small></p>}
               {i.prices?.length ? <p><small><b>Prices seen:</b> {i.prices.map((x) => `${x.item} ${x.price}`).join(" · ")}</small></p> : null}
               {i.weaknesses?.length ? <ul className="hv-weak">{i.weaknesses.map((w) => <li key={w.point}><small>{w.point} · <a href={w.source} target="_blank" rel="noopener noreferrer">source</a></small></li>)}</ul> : null}
               {i.switch_angle && <p><small><b>Why switch to you:</b> {i.switch_angle}</small></p>}
@@ -287,7 +304,7 @@ export default async function HarveyPage({ searchParams }: { searchParams: Promi
           <Link href="/dashboard/harvey" className={`pill ${!stage ? "on" : ""}`}>All open</Link>
           {STAGES.map((st) => { const n = list.filter((p) => p.stage === st).length; return <Link key={st} href={`/dashboard/harvey?stage=${st}`} className={`pill ${stage === st ? "on" : ""}`}>{STAGE_LABEL[st]} {n ? <small>{n}</small> : null}</Link>; })}
         </nav>
-        {!shown.length ? <p className="muted">{ready ? "No prospects here yet. Let Harvey find some, or add one you already know below." : "Harvey is still learning your business. Refresh in a few seconds."}</p> : (
+        {!shown.length ? <p className="muted">{ready ? "No prospects here yet. Let Harvey find some, or add one you already know below." : learnFailed ? "Harvey can find prospects once it has learned your business." : "Harvey is still learning your business. Refresh in a few seconds."}</p> : (
           <div className="table-wrap"><table><thead><tr><th>Prospect</th><th>Stage</th><th className="num">Fit</th><th>Why now</th><th>Next step</th><th className="num">Value</th></tr></thead><tbody>
             {shown.map((p) => { const r = (p.research ?? {}) as Research; return (
               <tr key={p.id} className={sel?.id === p.id ? "hv-sel" : ""}>
