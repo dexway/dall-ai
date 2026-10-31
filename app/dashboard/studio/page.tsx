@@ -7,17 +7,20 @@ import { generationConfigured, quoteMotion } from "@/lib/creative/jobs";
 import { MotionBrief, MotionPack, prefillMotionBrief, motionQuestions, GOALS, MOTION_PLATFORMS } from "@/lib/creative/motion";
 import * as A from "./actions";
 import StudioDemo from "./StudioDemo";
+import CulturePanel from "./culture/CulturePanel";
 import "./studio.css";
 
 export const metadata = { title: "Content Creator" };
 export const maxDuration = 300;
 
 const TABS = [["brief", "1 · Brief"], ["accounts", "2 · Accounts"], ["research", "3 · Research"], ["strategy", "4 · Strategy"], ["calendar", "5 · Calendar"], ["production", "6 · Production"], ["motion", "Motion video"], ["autopilot", "Autopilot"], ["usage", "Usage"]] as const;
+// Creative Studio: cultural intelligence add-on, shown after the Content Creator tabs.
+const CS_TABS = [["culture", "Cultural Research"]] as const;
 const OBJECTIVES = ["awareness", "engagement", "leads", "bookings", "sales", "retention", "other"];
 const PLATFORMS = ["instagram", "tiktok", "facebook", "x", "linkedin", "youtube", "whatsapp"];
 const STATUS_LABEL: Record<string, string> = { draft: "Draft", awaiting_approval: "Awaiting approval", approved: "Approved", rejected: "Rejected", revision_requested: "Revision requested", generation_queued: "Generation queued", generating: "Generating", generated: "Ready for review", completed: "Completed", failed: "Failed", cancelled: "Cancelled" };
-const ERR: Record<string, string> = { role: "Only owners and admins can change the Creative Director.", brand: "Pick or create a brand first.", brief: "Check the brief", asset: "Brand files must be PNG, JPG, WEBP or PDF under 4 MB.", account: "Add at least one account.", running: "Research is already running for this brand.", ai: "The Creative Director couldn't finish that", state: "That step isn't available right now", locked: "Approved items are locked. Request a revision to change them.", model: "Pick a model an admin has enabled.", confirm: "Tick the box to confirm the spend.", quota: "Generation blocked" };
-const OK: Record<string, string> = { brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", motion: "Brief saved.", site_importing: "Reading your website and copying its best photos. It takes about a minute; refresh to see them.", motion_drafting: "Your motion director is reviewing your photos and writing the storyboard. It takes 1–2 minutes; refresh to see it.", motion_approved: "Production pack approved.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
+const ERR: Record<string, string> = { ci_topic: "Describe what to research in a sentence", ci_failed: "Research couldn't start", role: "Only owners and admins can change the Creative Director.", brand: "Pick or create a brand first.", brief: "Check the brief", asset: "Brand files must be PNG, JPG, WEBP or PDF under 4 MB.", account: "Add at least one account.", running: "Research is already running for this brand.", ai: "The Creative Director couldn't finish that", state: "That step isn't available right now", locked: "Approved items are locked. Request a revision to change them.", model: "Pick a model an admin has enabled.", confirm: "Tick the box to confirm the spend.", quota: "Generation blocked" };
+const OK: Record<string, string> = { ci_started: "Research started. It usually takes 1–3 minutes; refresh to see progress.", brief: "Brief saved. Now add the accounts to research.", suggested: "Suggestions added below. Keep the ones you want; nothing is researched until you accept it.", research: "Research is running. It usually takes 1–3 minutes; refresh to see progress.", autopilot: "Autopilot saved. It runs every 5 minutes.", motion: "Brief saved.", site_importing: "Reading your website and copying its best photos. It takes about a minute; refresh to see them.", motion_drafting: "Your motion director is reviewing your photos and writing the storyboard. It takes 1–2 minutes; refresh to see it.", motion_approved: "Production pack approved.", generating: "Generation authorized. Jobs are queued and the budget is held; results appear here as they finish." };
 
 function Chip({ s }: { s: string }) { return <span className={`chip st-${s}`}>{STATUS_LABEL[s] ?? s.replace(/_/g, " ")}</span>; }
 function Sources({ urls, map }: { urls: string[]; map: Map<string, string> }) {
@@ -31,7 +34,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
   const sp = await searchParams;
   const db = supabaseAdmin();
   const ws = ctx.workspace.id;
-  const tab = (TABS.find(([k]) => k === sp.tab)?.[0]) ?? "brief";
+  const tab = ([...TABS, ...CS_TABS].find(([k]) => k === sp.tab)?.[0]) ?? "brief";
   const { data: brands, error: setupErr } = await db.from("creative_brands").select("id,name,onboarding_step").eq("workspace_id", ws).order("created_at");
   // Until the Creative Director tables exist (migrations awaiting approval), or when ?demo=1, show the preview.
   if (setupErr || sp.demo === "1") return <StudioDemo />;
@@ -90,6 +93,8 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
 
       <nav className="cd-tabs" aria-label="Creative Director steps">
         {TABS.map(([k, l]) => <Link key={k} href={href(k)} aria-current={tab === k ? "page" : undefined}>{l}</Link>)}
+        <span className="cd-divider">Creative Studio</span>
+        {CS_TABS.map(([k, l]) => <Link key={k} href={href(k)} aria-current={tab === k ? "page" : undefined}>{l}</Link>)}
         <form action={A.createBrand} className="cd-newbrand"><input name="name" placeholder="New brand" className="input" /><button className="btn btn-ghost btn-sm">+ Brand</button></form>
       </nav>
 
@@ -331,6 +336,7 @@ export default async function Studio({ searchParams }: { searchParams: Promise<R
       )}
 
       {tab === "production" && <Production B={B} ws={ws} models={(models ?? []) as ModelRow[]} sp={sp} />}
+      {tab === "culture" && <CulturePanel B={B} ws={ws} sp={sp} />}
       {tab === "usage" && <Usage ws={ws} B={B} userId={ctx.user.id} />}
       {tab === "autopilot" && <Autopilot B={B} ws={ws} />}
       {tab === "motion" && <Motion B={B} ws={ws} name={full?.name ?? brand.name} profile={profile} assets={(full?.asset_paths ?? []) as string[]} sp={sp} site={full ? { content: full.site_content as SiteBlob | null, at: full.site_imported_at as string | null, error: full.site_import_error as string | null } : null} />}
