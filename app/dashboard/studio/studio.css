@@ -90,3 +90,20 @@ button.pill { cursor: pointer; font: inherit; font-size: 12px; }
 .usage-row .bar span { background: #2F8F4E; } .usage-row .bar span.held { background: #F0C36B; }
 .usage-row.warn .bar span:first-child { background: #D9822B; }
 .usage-row .row span { font-size: 13px; color: var(--ink-70); }
+
+/* Creative Studio · Cultural Research (add-on) */
+.cd-divider { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: #6b6b66; margin: 0 2px 0 8px; padding-left: 10px; border-left: 1px solid var(--line, #e3e3df); }
+.ci-stages { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; }
+.ci-stages li { padding-left: 22px; position: relative; color: #8a8a84; }
+.ci-stages li::before { content: ""; position: absolute; left: 4px; top: 6px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #c9c9c3; }
+.ci-stages li.done { color: inherit; }
+.ci-stages li.done::before { background: #14231F; border-color: #14231F; }
+.ci-stages li.now { color: inherit; font-weight: 600; }
+.ci-stages li.now::before { border-color: #14231F; animation: ci-pulse 1.2s ease-in-out infinite; }
+@keyframes ci-pulse { 50% { transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .ci-stages li.now::before { animation: none; } }
+.ci-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.ci-card { border: 1px solid var(--line, #e3e3df); border-radius: 12px; padding: 12px; background: #fff; display: grid; gap: 6px; }
+.ci-card p { margin: 0; }
+.ci-list { padding-left: 18px; }
+.ci-list a[aria-current="page"] { font-weight: 600; }

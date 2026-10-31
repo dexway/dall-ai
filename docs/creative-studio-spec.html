@@ -1,0 +1,144 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Creative Studio · Cultural Intelligence add-on</title>
+<style>
+@page{size:A4;margin:18mm 16mm}
+body{font:10.5pt/1.5 -apple-system,Helvetica,Arial,sans-serif;color:#1b1b1b}
+h1{font-size:22pt;margin:0 0 4px}h2{font-size:14pt;margin:22px 0 6px;border-bottom:2px solid #0b6b4f;padding-bottom:3px;color:#0b6b4f}
+h3{font-size:11.5pt;margin:14px 0 4px}
+.sub{color:#555;margin-bottom:14px}
+table{border-collapse:collapse;width:100%;margin:6px 0 10px;font-size:9.5pt}
+th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eef5f1}
+code{font:9pt Menlo,monospace;background:#f3f3f3;padding:0 3px}
+pre{font:8.6pt/1.4 Menlo,monospace;background:#f6f6f6;padding:8px;border-radius:4px;white-space:pre-wrap}
+.box{border-left:4px solid #0b6b4f;background:#f2f8f5;padding:8px 10px;margin:10px 0}
+.warn{border-left-color:#b36b00;background:#fff7ea}
+li{margin:2px 0}
+</style></head><body>
+<h1>Creative Studio · Nigerian Cultural Intelligence</h1>
+<div class="sub">Add-on architecture and implementation spec for dall-ai (dexway/dall-ai), mapped to the code on <code>main</code> as of 31 Oct 2026.</div>
+
+<div class="box"><b>The ground rule.</b> This is purely an addition. No current page, route, table, navigation item, style or flow changes behaviour or appearance. Ads, Marketing, Harvey, the Assistant & launch kit and the existing Content Creator tabs (Brief → Production, Motion video, Autopilot, Usage) stay exactly as they are. Everything new lives in <b>one new tab group inside Content Creator</b>, new tables with a <code>ci_</code> prefix and a new <code>lib/culture/</code> folder.</div>
+
+<h2>1. Where it sits in the app today</h2>
+<table>
+<tr><th>Existing piece</th><th>What it is</th><th>How the add-on uses it (read-only unless noted)</th></tr>
+<tr><td><code>/dashboard/studio</code> (sidebar label "Content Creator")</td><td>Tabbed page; <code>TABS</code> array in <code>page.tsx</code></td><td>Gets four new tabs appended after "Usage". Existing tabs untouched.</td></tr>
+<tr><td><code>lib/ai/gateway.ts</code> <code>gatewayCall</code></td><td>The only path to Anthropic: credits, spend caps, web search cost, ledger</td><td>New feature names <code>culture_research</code>, <code>culture_curate</code>, <code>culture_create</code>, <code>culture_qa</code> added to the union and to <code>LONG_FEATURES</code>. Nothing else changes.</td></tr>
+<tr><td><code>lib/creative/director.ts</code> research/strategy/calendar/spec</td><td>Current Creative Director</td><td>Not modified. Approved concepts can be handed to it as a content item (see §6).</td></tr>
+<tr><td><code>lib/creative/jobs.ts</code>, <code>router.ts</code>, <code>higgsfield.ts</code></td><td>Higgsfield generation jobs, budgets, model routing</td><td>Production agent creates normal <code>content_items</code> / <code>generation_jobs</code> through existing functions, so budgets and approvals still apply.</td></tr>
+<tr><td><code>creative_brands</code>, <code>catalogue_items</code>, <code>promotions</code>, <code>business_profile</code>, Harvey <code>knowledge</code></td><td>Business source of truth</td><td>Read for Private Business Memory. Never copied into shared tables.</td></tr>
+<tr><td><code>lib/net-guard.ts</code> <code>fetchPublic</code></td><td>SSRF-safe fetch</td><td>Used by the Source Scout for permitted sources.</td></tr>
+<tr><td><code>/api/cron/marketing</code></td><td>Scheduler</td><td>Gets one extra call, <code>runCultureSchedule()</code>, wrapped in its own try/catch so a failure can't affect existing jobs.</td></tr>
+<tr><td><code>platform_admins</code></td><td>Admin gate (only your account)</td><td>Gates the new shared-knowledge review page <code>/admin/culture</code>.</td></tr>
+</table>
+
+<h2>2. What the user sees</h2>
+<p>Inside Content Creator, after the existing tabs, a divider labelled <b>Creative Studio</b> and four tabs, styled with the existing <code>studio.css</code> classes so it looks native:</p>
+<table>
+<tr><th>Tab (<code>?tab=</code>)</th><th>Purpose</th></tr>
+<tr><td>Cultural Research (<code>culture</code>)</td><td>Ask for research ("funny Lagos relationship situations for a couples' dinner"), pick depth (Quick / Standard / Deep), watch the 7-stage progress panel, read findings with sources and confidence.</td></tr>
+<tr><td>Campaign Concepts (<code>concepts</code>)</td><td>Campaign brief prefilled from the business (type, area, products, offers, colours); objective, creative direction, formats. Returns 3–5 concepts, each with "why this works", the cultural references used and the product tie-in. Approve, revise or reject.</td></tr>
+<tr><td>Content Production (<code>cproduce</code>)</td><td>Approved concept → script, shot list, image/video prompts, carousel, captions, voiceover. QA scorecard. "Send to Production" creates items in the existing Production/Motion pipeline.</td></tr>
+<tr><td>Campaign Insights (<code>insights</code>)</td><td>Enquiries and orders attributed to each campaign (via a tracked WhatsApp link), plus what hooks/formats performed. Shows "not enough data yet" until there is.</td></tr>
+</table>
+<p>No new sidebar item. The existing "Content Creator" label stays. Users never see the agents by name; they see the stages and results.</p>
+
+<h2>3. Agent flow (agentic, behind the four tabs)</h2>
+<p>Agents are <b>workflow steps sharing the gateway</b>, each with its own system prompt, allowed tools and output schema (zod, like <code>lib/creative/schemas.ts</code>). Not nine always-running models.</p>
+<h3>A. Cultural Intelligence Orchestrator (shared, runs regardless of any business)</h3>
+<table>
+<tr><th>Step</th><th>Tools</th><th>Writes</th></tr>
+<tr><td>Research Director — plans tasks by mode (foundational, scheduled, trend-triggered, on-demand)</td><td>none</td><td><code>ci_research_tasks</code></td></tr>
+<tr><td>Source Scout + Trend Monitor (one agent in v1)</td><td>Anthropic web search; <code>fetchPublic</code> on the allow-list</td><td><code>ci_findings</code> (status <code>raw</code>)</td></tr>
+<tr><td>Evidence Verifier</td><td>re-fetch, date check, allow-list check</td><td>finding status <code>verified</code> / <code>rejected</code> with reason</td></tr>
+<tr><td>Cultural Analyst</td><td>retrieval</td><td>meaning, audience, region, why it's funny/relatable</td></tr>
+<tr><td>Knowledge Archivist</td><td>dedupe (normalised key + embedding similarity later)</td><td><code>ci_knowledge</code> new version, status <code>pending_review</code></td></tr>
+</table>
+<p>Shared knowledge becomes <code>trusted</code> only after admin approval at <code>/admin/culture</code> (or automatic approval for high-confidence evergreen items, behind a setting that defaults off). Research updates the knowledge base, never the model, so every fact can be traced, corrected and rolled back.</p>
+<h3>B. Commercial Creative Orchestrator (per business, per campaign)</h3>
+<pre>Brief ─► Brand Strategist ─► Cultural Analyst (retrieve trusted + campaign research)
+      ─► [if depth ≠ Quick: on-demand research task, results shown as they land]
+      ─► Story Architect (3–5 concepts) ─► user approves one
+      ─► Production Director (package) ─► QA (scorecard; one auto-fix retry)
+      ─► user approves ─► existing content_items / generation_jobs</pre>
+<p>QA reuses the pattern of Harvey's <code>gate.ts</code>: deterministic checks (claims match catalogue prices and active promotions, no banned phrases, no unfilled placeholders) plus an AI review of language, cultural fit and freshness. A failed check shows the reason, as Harvey does.</p>
+<h3>C. Learning loop</h3>
+<p>Performance Analyst (phase 7) reads campaign attribution and reports per audience and format, with sample sizes. It writes to <code>ci_performance</code>, never directly to shared knowledge.</p>
+
+<h2>4. Data model (new tables only)</h2>
+<p>Migration <code>0028_creative_studio_culture.sql</code>. Shared tables have no <code>workspace_id</code> and are readable by signed-in users, writable only by the service role. Tenant tables use the existing <code>is_member(workspace_id)</code> RLS.</p>
+<table>
+<tr><th>Table</th><th>Memory</th><th>Key columns</th></tr>
+<tr><td><code>ci_sources</code></td><td>shared</td><td>url/domain, kind (blog, forum, news, comedy, api), allowed bool, terms_note, added_by</td></tr>
+<tr><td><code>ci_research_tasks</code></td><td>shared or campaign</td><td>mode, topic, depth, workspace_id (null = shared), campaign_id, status, stage, error, cost_usd</td></tr>
+<tr><td><code>ci_findings</code></td><td>evidence</td><td>task_id, source_url, published_at, discovered_at, excerpt (short, no copying), status, reject_reason</td></tr>
+<tr><td><code>ci_knowledge</code></td><td>shared cultural</td><td>key, version, title, meaning, kind (slang, situation, reference, trend, history), lifespan (evergreen, recurring, trending, historical), region, audience, evidence ids, confidence, usage_rights, status, last_verified_at, refresh_due_at, superseded_by</td></tr>
+<tr><td><code>ci_campaigns</code></td><td>campaign</td><td>workspace_id, brief jsonb, depth, status, chosen_concept_id, tracking_code</td></tr>
+<tr><td><code>ci_concepts</code></td><td>campaign</td><td>campaign_id, title, story, why, knowledge ids, product refs, status, feedback</td></tr>
+<tr><td><code>ci_packages</code></td><td>campaign</td><td>concept_id, script, shots, prompts, captions, qa jsonb, content_item_ids</td></tr>
+<tr><td><code>ci_performance</code></td><td>performance</td><td>campaign_id, period, views, clicks, enquiries, orders, revenue_ngn, source</td></tr>
+</table>
+<p>Private business memory is not a new table: it is assembled at runtime from the existing business tables, the same way Harvey's <code>gatherAccount</code> does, so no business data is ever written into shared rows.</p>
+
+<h2>5. Research freshness and sources</h2>
+<table><tr><th>Lifespan</th><th>Default re-verify</th></tr>
+<tr><td>Evergreen language / culture</td><td>Quarterly</td></tr><tr><td>Historical references</td><td>When new evidence appears</td></tr>
+<tr><td>Recurring social situations</td><td>Monthly</td></tr><tr><td>Lifestyle / entertainment trends</td><td>Weekly</td></tr>
+<tr><td>Live viral topics</td><td>Daily, permitted sources only</td></tr><tr><td>Campaign research</td><td>On demand</td></tr></table>
+<div class="box warn"><b>Source rules.</b> No scraping of Instagram, Facebook or TikTok; their terms forbid unapproved automated collection. Use Anthropic web search, an admin-managed allow-list of blogs, news and forums whose terms permit it, official APIs when connected, and human-curated entries. Store short excerpts and summaries, never whole articles or posts, and always the source and date.</div>
+
+<h2>6. Hand-off into the existing pipeline</h2>
+<ul>
+<li>"Send to Production" creates <code>content_items</code> rows in the brand's current calendar month (or a new "Creative Studio" calendar) with the package's prompt. From there the existing Production tab, budgets, model router and Higgsfield jobs do the work unchanged.</li>
+<li>Launch-style concepts can prefill a <code>motion_projects</code> brief instead.</li>
+<li>Each campaign gets a <code>tracking_code</code>; its WhatsApp link is <code>wa.me/&lt;number&gt;?text=…[code]</code>. The inbox already records the first message, so attribution is one new lookup in the existing conversation start handler, read-only for everything else.</li>
+<li>Ads stays separate. A campaign can later be offered to Ads as a creative, but nothing in Ads changes in this work.</li>
+</ul>
+
+<h2>6b. Shared cultural context for the other agents (read-only)</h2>
+<p>Once trusted knowledge exists, one small helper, <code>cultureContext(workspaceId, topic, max)</code> in <code>lib/culture/retrieve.ts</code>, returns a short block (a few hundred tokens) of relevant trusted references for that business's niche and area. Other agents can opt in by adding that block to their prompt; they keep their own logic, UI and outputs:</p>
+<table><tr><th>Agent</th><th>What it gains</th><th>Touch point</th></tr>
+<tr><td>Harvey (writer, handler)</td><td>Outreach and replies that sound local and current, with references a Lagos owner recognises</td><td>One line appended in <code>knowledgeBlock()</code>; Harvey's gate still checks every draft</td></tr>
+<tr><td>Motion video (<code>MOTION_SKILL</code>)</td><td>Launch-video scenes, captions and on-screen lines grounded in recognisable situations</td><td>Extra context in <code>motionRequest()</code></td></tr>
+<tr><td>Sales assistant (<code>lib/ai/agent.ts</code>)</td><td>Tone and expressions only; prices and offers still come only from the catalogue</td><td>Optional, off by default, per-agent toggle</td></tr>
+<tr><td>Creative Director research / calendar</td><td>Content ideas tied to current cultural moments</td><td>Context block in <code>runResearch</code> / <code>draftCalendar</code></td></tr></table>
+<p>Each hook is guarded: if there's no trusted knowledge or the lookup fails, the agent runs exactly as it does today. These come after phase 2, one agent at a time.</p>
+
+<h2>7. Files to add (and the only lines touched in existing files)</h2>
+<pre>NEW  lib/culture/agents.ts        prompts + zod schemas for each agent
+NEW  lib/culture/orchestrator.ts  runCultureTask, runCampaign, stage updates
+NEW  lib/culture/retrieve.ts      controlled retrieval across the 4 memories
+NEW  lib/culture/qa.ts            deterministic checks + AI review
+NEW  lib/culture/schedule.ts      runCultureSchedule (freshness, trend checks)
+NEW  app/dashboard/studio/culture/*.tsx   the four tab panels + actions.ts
+NEW  app/admin/culture/page.tsx   review queue, source allow-list (platform_admins only)
+NEW  supabase/migrations/0028_creative_studio_culture.sql
+NEW  tests/culture.test.ts
+
+EDIT lib/ai/gateway.ts            +4 feature names (type + LONG_FEATURES)
+EDIT app/dashboard/studio/page.tsx  append 4 entries to TABS, 4 render lines
+EDIT app/api/cron/marketing/route.ts  +1 guarded call</pre>
+
+<h2>8. Build order</h2>
+<table><tr><th>Phase</th><th>Delivers</th><th>Needs</th></tr>
+<tr><td>1</td><td>Migration, orchestrator skeleton, stage tracking, Cultural Research tab (on-demand), admin review</td><td>Anthropic credit</td></tr>
+<tr><td>2</td><td>Foundational research seed (Lagos life, comedy, slang, history), scheduled refresh</td><td>Allow-list of sources</td></tr>
+<tr><td>3</td><td>Campaign Concepts tab: strategist + analyst + Story Architect</td><td>—</td></tr>
+<tr><td>4</td><td>Content Production tab: package + QA + hand-off to Production/Motion</td><td>Higgsfield models enabled</td></tr>
+<tr><td>5</td><td>Tracking links + Campaign Insights</td><td>WhatsApp channel connected</td></tr>
+<tr><td>6</td><td>Performance learning feeding concept ranking</td><td>Real campaign data</td></tr></table>
+
+<h2>9. Cost and safety controls</h2>
+<ul>
+<li>All calls go through <code>gatewayCall</code>, so existing credits, spend caps and ledgers apply. Deep research counts its web searches.</li>
+<li>Each workspace gets a daily cap on research tasks; shared scheduled research has its own monthly USD budget set in <code>/admin/culture</code>.</li>
+<li>Nothing publishes automatically. Every concept and package needs the owner's approval, as in the current Content Creator.</li>
+<li>Tenant isolation: retrieval takes the workspace id and only ever joins shared + that workspace's rows; tests cover it.</li>
+</ul>
+
+<h2>10. Open decisions for you</h2>
+<ul>
+<li>Should shared knowledge go live only after your review, or auto-approve high-confidence evergreen items?</li>
+<li>Which sources to start the allow-list with (e.g. Nigerian news sites, Nairaland sections whose terms allow it, comedy blogs)?</li>
+<li>Monthly budget for shared background research.</li>
+</ul>
+</body></html>

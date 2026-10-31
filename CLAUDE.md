@@ -11,7 +11,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 ## Commands
 - `npm test` — node --test with --experimental-strip-types (pglite runs every migration). No TS parameter properties in files tests import.
 - `npx tsc --noEmit -p .` and `npx next build` before pushing.
-- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0027 are applied in production.
+- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0027 are applied in production (0028 Creative Studio culture is pending).
 
 ## Map
 - Channels: `lib/channels/{events,send,process}.ts`, webhooks in `app/api/webhooks/*`.
@@ -19,6 +19,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 - Orders, payments: `lib/orders.ts`, `lib/payments.ts`; bank changes need an emailed OTP code (`app/dashboard/settings`).
 - Marketing: `lib/marketing.ts` (follow-ups, broadcasts), `lib/promo.ts`, autopilot in `lib/autopilot.ts`, social posting in `lib/social-publish.ts`.
 - Harvey sales agent (ethanplusai/harvey, MIT): prompts+skills verbatim in `lib/harvey/harvey-skills.ts`, gate in `gate.ts`, account data in `context.ts`, agents in `agent.ts`, signals in `signals.ts`, UI `app/dashboard/harvey` (prospects, competitors, messages; owner sends every message).
+- Creative Studio (add-on inside Content Creator): `lib/culture/*` (schemas = pure checks, research.ts = orchestrator), tab `app/dashboard/studio/culture`, review at `app/admin/culture`; shared knowledge is trusted only after admin approval.
 - Content Creator / Creative Director: `lib/creative/*` (router.ts picks the best enabled model per task), UI `app/dashboard/studio`, admin `app/admin/creative`.
 - Cron: pg_cron calls `/api/cron/marketing` every 5 min (Vault secret); Vercel cron `/api/cron/daily` uses `CRON_SECRET`.
 - Security: `lib/rate-limit.ts`, `lib/net-guard.ts` (SSRF), CSP report-only and Permissions-Policy in `next.config.ts`.
