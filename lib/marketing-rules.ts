@@ -44,3 +44,18 @@ export function broadcastEligibility(r: AudienceRow, channel: string, now = Date
   if (channel !== "whatsapp" && !withinWindow(r.last_inbound_at, now)) return "skip_window";
   return "send";
 }
+
+/** How long the team can go quiet in a chat they took over before the assistant answers again. */
+export const AI_RESUME_AFTER_HOURS = 2;
+export const TEAM_TAKEOVER = "Taken over by the team";
+
+/**
+ * A team reply pauses the assistant so it doesn't talk over them. If they then go quiet for
+ * AI_RESUME_AFTER_HOURS the assistant answers again, so a customer is never left unanswered.
+ * A handoff the customer asked for ("I want a person") stays with the team until they hand it back.
+ */
+export function aiShouldResume(chat: { ai_paused: boolean; handoff_reason: string | null }, lastTeamReplyAt: string | null, now = Date.now()): boolean {
+  if (!chat.ai_paused || !lastTeamReplyAt) return false;
+  if (chat.handoff_reason && chat.handoff_reason !== TEAM_TAKEOVER) return false;
+  return now - Date.parse(lastTeamReplyAt) >= AI_RESUME_AFTER_HOURS * HOUR;
+}

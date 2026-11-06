@@ -5,6 +5,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { runAgentTurn } from "@/lib/ai/agent";
 import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
+import { stillPaused } from "@/lib/chat-session";
 import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { flagIfAuthFailure } from "@/lib/channels/health";
 import { sendText } from "@/lib/channels/send";
@@ -14,7 +15,7 @@ import {
 } from "@/lib/channels/events";
 
 type Conn = { id: string; workspace_id: string; provider: Provider; external_id: string; access_token_enc: string; status: string };
-type Conv = { id: string; workspace_id: string; agent_id: string; channel: string; external_ref: string | null; ai_paused: boolean; last_inbound_at: string | null; attribution: unknown };
+type Conv = { id: string; workspace_id: string; agent_id: string; channel: string; external_ref: string | null; ai_paused: boolean; handoff_reason: string | null; last_inbound_at: string | null; attribution: unknown };
 
 const RESTING = "Sorry, this assistant is resting right now. A team member will get back to you.";
 const MAX_INBOUND_PER_MINUTE = 10;
@@ -95,7 +96,7 @@ const attributionOf = (r: Referral | undefined) => r ? {
 async function upsertConversation(conn: Conn, contactId: string, opts: { contactName?: string; referral?: Referral; inbound: boolean }): Promise<{ conv: Conv; created: boolean } | null> {
   const db = supabaseAdmin();
   const now = new Date().toISOString();
-  const { data: existing } = await db.from("conversations").select("id,workspace_id,agent_id,channel,external_ref,ai_paused,last_inbound_at,attribution,contact_name")
+  const { data: existing } = await db.from("conversations").select("id,workspace_id,agent_id,channel,external_ref,ai_paused,handoff_reason,last_inbound_at,attribution,contact_name")
     .eq("workspace_id", conn.workspace_id).eq("channel", conn.provider).eq("external_ref", contactId).maybeSingle();
   if (existing) {
     const patch: Record<string, unknown> = { last_message_at: now };
@@ -111,7 +112,7 @@ async function upsertConversation(conn: Conn, contactId: string, opts: { contact
     workspace_id: conn.workspace_id, agent_id: agent.id, channel: conn.provider, external_ref: contactId,
     contact_name: opts.contactName ?? null, last_message_at: now, last_inbound_at: opts.inbound ? now : null, unread: opts.inbound,
     ...attributionOf(opts.referral),
-  }).select("id,workspace_id,agent_id,channel,external_ref,ai_paused,last_inbound_at,attribution").single();
+  }).select("id,workspace_id,agent_id,channel,external_ref,ai_paused,handoff_reason,last_inbound_at,attribution").single();
   if (error) {
     // Two deliveries racing to open the same chat: use the one that won.
     if (error.code === "23505") return upsertConversation(conn, contactId, opts);
@@ -143,7 +144,7 @@ async function handleMessage(conn: Conn, ev: MessageEvent): Promise<"processed" 
 
   // The owner decides whether the assistant answers here.
   if (conn.status !== "active") return "processed";       // channel paused or needs reconnecting: inbox only
-  if (conv.ai_paused) return "processed";                   // a team member took over this chat
+  if (await stillPaused(conv)) return "processed";          // a team member took over this chat (auto-resumes when they go quiet)
 
   const since = new Date(Date.now() - 60_000).toISOString();
   const { count } = await db.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conv.id).eq("role", "user").gte("created_at", since);
