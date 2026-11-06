@@ -38,13 +38,34 @@ export class GatewayError extends Error {
 type ProviderResult = { message: Anthropic.Message; requestId: string | null };
 interface Provider { create(p: Anthropic.MessageCreateParamsNonStreaming): Promise<ProviderResult> }
 
+/**
+ * Prompt caching: tools + system prompt are the same on every turn of a chat (~4,800 tokens), and the
+ * conversation so far is the same on every tool-loop step. Mark both so repeat calls read them at the
+ * cache price instead of paying full input again. Prompts under the model's minimum just don't cache.
+ */
+export function withCache(p: Anthropic.MessageCreateParamsNonStreaming): Anthropic.MessageCreateParamsNonStreaming {
+  const mark = { type: "ephemeral" } as const;
+  const system = typeof p.system === "string" && p.system ? [{ type: "text" as const, text: p.system, cache_control: mark }] : p.system;
+  const messages = p.messages.slice();
+  const last = messages[messages.length - 1];
+  if (last) {
+    const blocks = typeof last.content === "string" ? [{ type: "text" as const, text: last.content }] : last.content.slice();
+    const end = blocks[blocks.length - 1];
+    if (end && end.type !== "thinking" && end.type !== "redacted_thinking") {
+      blocks[blocks.length - 1] = { ...end, cache_control: mark } as typeof end;
+      messages[messages.length - 1] = { ...last, content: blocks } as Anthropic.MessageParam;
+    }
+  }
+  return { ...p, system, messages };
+}
+
 class AnthropicProvider implements Provider {
   private client: Anthropic;
   constructor(key: string) {
     this.client = new Anthropic({ apiKey: key, timeout: AI.requestTimeoutMs, maxRetries: AI.maxRetries });
   }
   async create(p: Anthropic.MessageCreateParamsNonStreaming) {
-    const { data, request_id } = await this.client.messages.create(p).withResponse();
+    const { data, request_id } = await this.client.messages.create(withCache(p)).withResponse();
     return { message: data, requestId: request_id ?? null };
   }
 }

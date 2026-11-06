@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { supabaseUser, supabaseAdmin } from "@/lib/supabase/server";
 import { BRAND } from "@/lib/config";
+import SubmitButton from "./SubmitButton";
 import "../(auth)/auth.css";
 
 export const metadata = { title: "Set up your business" };
@@ -73,7 +74,7 @@ export default async function Onboarding({ searchParams }: { searchParams: Promi
             </label>
             <label className="field"><span>Website or Instagram page (optional)</span><input name="website" className="input" maxLength={300} placeholder="yourshop.com" autoComplete="url" />
               <small style={{ color: "var(--ink-70)" }}>We&apos;ll use it to prepare a launch video for your business.</small></label>
-            <button className="btn btn-ink">Continue</button>
+            <SubmitButton>Continue</SubmitButton>
           </form>
           <p className="muted" style={{ fontSize: 14 }}>Free during early access.</p>
         </div>
