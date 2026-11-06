@@ -94,3 +94,13 @@ test("rate limiter counts per key and window, and signed-in users can't call it"
   await as(A, async () => { await assert.rejects(db.query(`select hit_rate_limit('t:3', 3, 60)`), /permission denied/); });
   await as(A, async () => { assert.equal((await db.query(`select * from rate_limits`)).rows.length, 0); });
 });
+
+test("the agent's lead upsert (on conflict conversation_id) updates the chat's one lead", async () => {
+  const conv = (await one(`select id from conversations where workspace_id = $1`, [wsA])).id;
+  const up = `insert into leads (workspace_id, conversation_id, interest) values ($1,$2,$3) on conflict (conversation_id) do update set interest = excluded.interest`;
+  await db.query(up, [wsA, conv, "wedding hall"]);
+  await db.query(up, [wsA, conv, "wedding hall for 250"]);
+  const rows = (await db.query(`select interest from leads where conversation_id = $1`, [conv])).rows;
+  assert.deepEqual(rows.map((r) => r.interest), ["wedding hall for 250"]);
+  await db.query(`insert into leads (workspace_id, interest) values ($1,'walk-in'), ($1,'phone call')`, [wsA]);   // no chat: still allowed
+});
