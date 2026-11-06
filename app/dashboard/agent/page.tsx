@@ -6,13 +6,15 @@ import { BUILTIN_PRESETS } from "@/lib/presets";
 import { extractText } from "@/lib/extract";
 import Studio from "./Studio";
 import AgentChannels from "./AgentChannels";
-import { fetchPublicPage, checkUrlShape } from "@/lib/net-guard";
+import { checkUrlShape } from "@/lib/net-guard";
+import { learnSite } from "@/lib/site-knowledge-fetch";
 import LaunchKit from "./LaunchKit";
 
-const KNOWLEDGE_CAP = 16000;
+const KNOWLEDGE_CAP = 48000;
 const MAX_DOC = 10 * 1024 * 1024;
 
 export const metadata = { title: "Assistant studio" };
+export const maxDuration = 60; // reading a whole website can take ~25s
 
 const LANGS = ["English", "Pidgin", "Yorùbá", "Igbo", "Hausa"];
 const VOICES = ["lagos-english", "pidgin", "yoruba", "igbo", "hausa"];
@@ -75,10 +77,8 @@ async function learnFromWebsite(formData: FormData) {
 
   let text = "";
   try {
-    // Public pages only: private/internal addresses are refused at connect time, redirects re-checked.
-    const html = (await fetchPublicPage(url)).slice(0, 400000);
-    text = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
+    // The whole site (rooms, menus, prices, contact), not just the home page. Public pages only.
+    text = (await learnSite(url)).knowledge;
   } catch { redirect("/dashboard/agent?error=fetch"); }
   if (!text) redirect("/dashboard/agent?error=fetch");
 
