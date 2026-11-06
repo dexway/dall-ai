@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { decryptSecret } from "@/lib/crypto";
 import { gatewayCall, GatewayError } from "@/lib/ai/gateway";
 import { formatNaira } from "@/lib/money";
+import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { deliver, connectionFor, logIntegrationError } from "@/lib/channels/process";
 import { sendTemplate } from "@/lib/channels/send";
 import { unpaidNudgeDue, quietLeadDue, broadcastEligibility, META_CHANNELS } from "@/lib/marketing-rules";
@@ -189,17 +190,27 @@ export async function marketingInsights(workspaceId: string) {
 
 export type CopyPack = { headline: string; ad_text: string; instagram_caption: string; whatsapp_status: string; broadcast_message: string };
 
-/** Writes ready-to-use marketing copy for one product (or the business) from real catalogue facts. */
+/** Writes ready-to-use marketing copy for one product (or the business) from real catalogue and website facts. */
 export async function generateCopy(args: { workspaceId: string; userId: string; businessName: string; item?: { name: string; price: number; description?: string | null } | null; goal: string; promo?: string | null }): Promise<CopyPack> {
-  const facts = args.item ? `Product: ${args.item.name}, price ${formatNaira(args.item.price)}${args.item.description ? `. ${args.item.description.slice(0, 300)}` : ""}` : "The whole business";
+  const db = supabaseAdmin();
+  // What the business actually sells, from its profile and the website/documents its assistant learned.
+  const [{ data: ws }, { data: agent }] = await Promise.all([
+    db.from("workspaces").select("business_profile").eq("id", args.workspaceId).single(),
+    db.from("agents").select("knowledge").eq("workspace_id", args.workspaceId).eq("active", true).order("created_at").limit(1).maybeSingle(),
+  ]);
+  const about = [profileText((ws?.business_profile ?? {}) as BusinessProfile), String(agent?.knowledge ?? "").slice(0, 8000)].filter(Boolean).join("\n\n");
+  const facts = args.item ? `Product: ${args.item.name}, price ${formatNaira(args.item.price)}${args.item.description ? `. ${args.item.description.slice(0, 300)}` : ""}` : "The whole business (pick its most appealing real offers from the facts below)";
   const res = await gatewayCall({
-    workspaceId: args.workspaceId, userId: args.userId, feature: "marketing_copy", maxTokens: 700,
-    system: "You write short, honest marketing copy for small Nigerian businesses that sell through chat. Use only the facts given: never invent prices, stock, reviews, or discounts. Plain, specific, warm; light Pidgin is fine in WhatsApp lines. Every piece invites people to message to order. Reply with JSON only.",
+    workspaceId: args.workspaceId, userId: args.userId, feature: "marketing_copy", maxTokens: 2000,
+    system: "You write short, honest marketing copy for small Nigerian businesses that sell through chat. Use only the facts given: never invent prices, stock, reviews, or discounts. Use real names, prices and details from the facts when they help. Plain, specific, warm; light Pidgin is fine in WhatsApp lines. Every piece invites people to message to order. Reply with one JSON object only, no code fences.",
     messages: [{ role: "user", content: `Business: ${args.businessName} (Lagos). ${facts}. Goal: ${args.goal}.${args.promo ? ` Live promotion: ${args.promo}.` : ""}
+${about ? `\nFacts about the business:\n${about}\n` : ""}
 Return JSON with keys: headline (max 40 chars), ad_text (Facebook/Instagram click-to-chat ad, max 300 chars), instagram_caption (max 70 words, max 4 hashtags), whatsapp_status (1-2 lines), broadcast_message (for customers who opted in, max 400 chars, ends with "Reply STOP to stop offers.").` }],
   });
   const raw = res.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text).join("");
-  const j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as Partial<CopyPack>;
+  let j: Partial<CopyPack>;
+  try { j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as Partial<CopyPack>; }
+  catch { throw new GatewayError("BAD_COPY", 502, res.stop_reason === "max_tokens" ? "The copy came out too long. Please try again." : "The AI's copy came back unreadable. Please try again."); }
   return {
     headline: String(j.headline ?? "").slice(0, 40), ad_text: String(j.ad_text ?? "").slice(0, 600),
     instagram_caption: String(j.instagram_caption ?? ""), whatsapp_status: String(j.whatsapp_status ?? ""),
