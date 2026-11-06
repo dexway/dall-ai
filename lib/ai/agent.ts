@@ -81,6 +81,14 @@ const tools: Anthropic.Tool[] = [
   },
 ];
 
+/** What's already saved for this chat, so the agent doesn't save and announce it again every turn. */
+export function leadNote(lead: { name: string | null; phone: string | null; email: string | null; interest: string | null; status: string; consent_contact: boolean } | null): string {
+  if (!lead) return "";
+  const contact = [lead.name, lead.phone, lead.email].filter(Boolean).join(", ") || "no contact details yet";
+  return `\n\nAlready saved for this chat (the team can see it): lead "${lead.interest ?? "interest not noted"}" · ${contact} · ${lead.status}${lead.consent_contact ? " · agreed to be contacted" : ""}.
+Don't tell the customer it's saved again and don't apologise about saving. Only call save_lead again when they give genuinely new details (new dates, contact, or a different request), and then just carry on with their question. Answer what they actually asked.`;
+}
+
 function systemPrompt(agent: AgentRow, businessName: string, profile: string, upsell = true) {
   return (`You are ${agent.name}, the ${agent.role_title} for ${businessName}, a business in Lagos, Nigeria.
 Personality: ${agent.persona}
@@ -102,7 +110,7 @@ Rules you never break:
 - Never say a payment is confirmed unless check_order says "PAID and confirmed". A transfer screenshot is not proof; say it is being checked.
 - Never ask for card numbers, PINs, OTPs or banking passwords.
 - If you cannot help, say a team member will follow up.
-- Leads: once you know what the customer wants, call save_lead. Before taking a phone number or email for follow-up, ask if it's okay for the team to contact them, and set consent_contact from their answer. Never invent contact details.
+- Leads: once you know what the customer wants, call save_lead (once; see "Already saved" below if present). Before taking a phone number or email for follow-up, ask if it's okay for the team to contact them, and set consent_contact from their answer. Never invent contact details.
 - Promotions: call list_promotions before giving a total. If one fits the order, mention it once and apply its code in create_checkout. Never invent a code or a promotion.
 - {UPSELL}
 - Offers by message: after a purchase or a warm chat, you may ask once if they'd like to hear about new products and offers here. Record the answer with record_marketing_consent. Never ask twice, never pressure.
@@ -189,13 +197,21 @@ async function runTool(name: string, input: Record<string, unknown>, ctx: { agen
         interest: clean(input.interest, 300), budget: clean(input.budget, 80), status,
         consent_contact: input.consent_contact === true, notes: clean(input.notes, 500), updated_at: new Date().toISOString(),
       };
+      // Keep what was saved before when this call leaves a field out (an update shouldn't erase the email).
+      const { data: prev } = await db.from("leads").select("name,phone,email,interest,budget,notes,consent_contact").eq("conversation_id", ctx.conversationId).maybeSingle();
+      if (prev) {
+        for (const k of ["name", "phone", "email", "interest", "budget", "notes"] as const) row[k] = row[k] ?? prev[k];
+        row.consent_contact = row.consent_contact || prev.consent_contact;
+      }
       const { error } = await db.from("leads").upsert(row, { onConflict: "conversation_id" });
       if (error) throw new Error(error.message);
       await db.from("conversations").update({
         ...(conv?.outcome === "open" ? { outcome: "qualified" } : {}),
         ...(status === "sales_ready" ? { unread: true, handoff_reason: `Sales-ready lead: ${row.interest ?? "see chat"}` } : {}),
       }).eq("id", ctx.conversationId);
-      return { saved: true, status, next_step: status === "sales_ready" ? "Tell the customer a team member will follow up shortly." : "Continue helping them." };
+      return { saved: true, updated: Boolean(prev), status, next_step: prev
+        ? "Updated quietly. Don't announce it; just answer the customer's message."
+        : status === "sales_ready" ? "Tell the customer once that a team member will follow up shortly." : "Continue helping them." };
     }
     if (name === "handoff_to_human") {
       await db.from("conversations").update({ ai_paused: true, unread: true, handoff_reason: String(input.reason ?? "Customer needs a person").slice(0, 300) }).eq("id", ctx.conversationId);
@@ -222,7 +238,10 @@ export async function runAgentTurn(args: {
 }): Promise<string> {
   const messages: Anthropic.MessageParam[] = [...args.history.slice(-AI.maxHistoryMessages), { role: "user", content: args.userText }];
   const { data: mk } = await supabaseAdmin().from("marketing_settings").select("upsell_enabled").eq("workspace_id", args.agent.workspace_id).maybeSingle();
-  const system = systemPrompt(args.agent, args.businessName, args.profile ?? "", mk?.upsell_enabled ?? true);
+  const { data: lead } = await supabaseAdmin().from("leads").select("name,phone,email,interest,status,consent_contact")
+    .eq("conversation_id", args.conversationId).maybeSingle();
+  // Chat history carries only message text, not tool calls, so tell the agent what it already saved.
+  const system = systemPrompt(args.agent, args.businessName, args.profile ?? "", mk?.upsell_enabled ?? true) + leadNote(lead);
 
   for (let step = 0; step <= AI.maxToolCallsPerTurn; step++) {
     const res = await gatewayCall({
