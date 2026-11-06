@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TEAM_TAKEOVER, AI_RESUME_AFTER_HOURS } from "@/lib/marketing-rules";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireWorkspace } from "@/lib/workspace";
@@ -40,7 +41,7 @@ async function toggleAi(formData: FormData) {
   const id = String(formData.get("c") ?? "");
   const { ctx, conv } = await ownConversation(id);
   const pause = formData.get("to") === "pause";
-  await supabaseAdmin().from("conversations").update({ ai_paused: pause, ...(pause ? { handoff_reason: "Taken over by the team", assigned_to: ctx.user.id } : { handoff_reason: null }) }).eq("id", conv.id);
+  await supabaseAdmin().from("conversations").update({ ai_paused: pause, ...(pause ? { handoff_reason: TEAM_TAKEOVER, assigned_to: ctx.user.id } : { handoff_reason: null }) }).eq("id", conv.id);
   await supabaseAdmin().from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, actor_id: ctx.user.id, action: pause ? "inbox.ai_paused" : "inbox.ai_resumed", entity: "conversation", entity_id: conv.id, details: {} });
   revalidatePath("/dashboard/inbox");
   redirect(go({ c: conv.id, f: String(formData.get("f") ?? "") || undefined, ch: String(formData.get("ch") ?? "") || undefined }));
@@ -241,7 +242,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
                     : <button className="btn btn-ink btn-sm">✋ Take over (pause AI)</button>}
                 </form>
               </header>
-              {sel.handoff_reason && <div className="handoff">{sel.ai_paused ? "🙋 Team handling" : "⚠️ Needs attention"}: {sel.handoff_reason}{sel.assigned_to ? ` · assigned to ${nameOf(sel.assigned_to)}` : ""}</div>}
+              {sel.handoff_reason && <div className="handoff">{sel.ai_paused ? "🙋 Team handling" : "⚠️ Needs attention"}: {sel.handoff_reason}{sel.assigned_to ? ` · assigned to ${nameOf(sel.assigned_to)}` : ""}{sel.ai_paused && (!sel.handoff_reason || sel.handoff_reason === TEAM_TAKEOVER) ? ` · the assistant answers again ${AI_RESUME_AFTER_HOURS} hours after your last reply` : ""}</div>}
 
               <div className="thread">
                 {(thread ?? []).map((m) => {

@@ -1,5 +1,6 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { aiShouldResume } from "@/lib/marketing-rules";
 
 export type PendingOrder = { reference: string; total_kobo: number; expires_at: string | null; status: string; pay_on_delivery: boolean; pod_offered: boolean };
 
@@ -24,4 +25,15 @@ export async function pendingOrder(conversationId: string): Promise<PendingOrder
   const { data: st } = await db.from("business_payment_settings").select("pay_on_delivery_enabled").eq("workspace_id", data.workspace_id).maybeSingle();
   const { workspace_id: _ws, ...o } = data;
   return { ...o, pod_offered: Boolean(st?.pay_on_delivery_enabled) };
+}
+
+/** Hands a quiet team takeover back to the assistant (see aiShouldResume). Returns whether the AI is still paused. */
+export async function stillPaused(conv: { id: string; ai_paused?: boolean; handoff_reason?: string | null }): Promise<boolean> {
+  if (!conv.ai_paused) return false;
+  const db = supabaseAdmin();
+  const { data: last } = await db.from("messages").select("created_at").eq("conversation_id", conv.id).eq("role", "human")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!aiShouldResume({ ai_paused: true, handoff_reason: conv.handoff_reason ?? null }, last?.created_at ?? null)) return true;
+  await db.from("conversations").update({ ai_paused: false, handoff_reason: null }).eq("id", conv.id);
+  return false;
 }

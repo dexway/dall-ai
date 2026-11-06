@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { runAgentTurn } from "@/lib/ai/agent";
 import { GatewayError } from "@/lib/ai/gateway";
 import { AI } from "@/lib/config";
-import { findConversation, pendingOrder } from "@/lib/chat-session";
+import { findConversation, pendingOrder, stillPaused } from "@/lib/chat-session";
 import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { clientIp, withinLimits, CHAT_LIMITS } from "@/lib/rate-limit";
 
@@ -34,15 +34,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   if (!agent) return NextResponse.json({ error: "This assistant is not available." }, { status: 404 });
 
   // Resume only a conversation this visitor owns
-  let conversation: { id: string; visitor_token: string; ai_paused?: boolean } | null = null;
+  let conversation: { id: string; visitor_token: string; ai_paused?: boolean; handoff_reason?: string | null } | null = null;
   if (parsed.data.conversationId && parsed.data.visitorToken) {
-    const { data } = await db.from("conversations").select("id,visitor_token,ai_paused")
+    const { data } = await db.from("conversations").select("id,visitor_token,ai_paused,handoff_reason")
       .eq("id", parsed.data.conversationId).eq("agent_id", agent.id).eq("visitor_token", parsed.data.visitorToken).maybeSingle();
     conversation = data;
   }
   if (!conversation) {
     const { data, error } = await db.from("conversations").insert({ workspace_id: ws.id, agent_id: agent.id, channel: "web" })
-      .select("id,visitor_token,ai_paused").single();
+      .select("id,visitor_token,ai_paused,handoff_reason").single();
     if (error) return NextResponse.json({ error: "Could not start a chat." }, { status: 500 });
     conversation = data;
   }
@@ -58,7 +58,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   await db.from("conversations").update({ last_message_at: now, last_inbound_at: now, unread: true }).eq("id", conversation.id);
 
   // A team member took over this chat: store the message for them and don't let the AI answer.
-  if (conversation.ai_paused) {
+  if (await stillPaused(conversation)) {
     return NextResponse.json({ reply: null, handedOver: true, conversationId: conversation.id, visitorToken: conversation.visitor_token, pending: await pendingOrder(conversation.id) });
   }
 
