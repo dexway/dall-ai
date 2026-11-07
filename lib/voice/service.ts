@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env";
 import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { voicePrompt, slotsFree, callStatus, type VoiceId } from "@/lib/voice/rules";
-import { buyNumber, connectNumberToVoice, createVoiceRoute, placeCall, upsertAssistant, releaseNumber, VoiceProviderError } from "@/lib/voice/providers";
+import { buyNumber, connectNumberToVoice, createVoiceRoute, placeCall, upsertAssistant, releaseNumber, telecomLive, voiceLive, VoiceProviderError } from "@/lib/voice/providers";
 
 // Dall AI calling: numbers, the business's voice agent, single calls and call campaigns.
 
@@ -60,6 +60,8 @@ export async function syncVoiceAgent(workspaceId: string, opts: { name?: string;
 
 /** Buys a number for the business and wires it to its voice agent (inbound answers, outbound dials). */
 export async function provisionNumber(workspaceId: string, userId: string, e164: string, country: string): Promise<string> {
+  // Never buy a real number that can't be connected to a voice agent: both providers live, or both in test mode.
+  if (telecomLive() !== voiceLive()) throw new Error("Calling isn't fully switched on yet. Please try again later.");
   const db = supabaseAdmin();
   const { data: row, error } = await db.from("voice_numbers").insert({ workspace_id: workspaceId, e164, country, created_by: userId }).select("id").single();
   if (error) throw new Error(error.message.includes("duplicate") ? "That number is already taken." : error.message);
