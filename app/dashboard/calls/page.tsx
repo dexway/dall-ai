@@ -137,7 +137,9 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
       <div className="page-head">
         <div><h1>Calls</h1><p>Get a phone number in minutes. Your assistant answers it, calls customers for you, and runs call campaigns, all in your business&apos;s name.</p></div>
       </div>
-      {testMode && <div className="notice">Calling is in test mode: you can try every step, but no real number is bought and no one is dialled.</div>}
+      {testMode && (telecomLive() || voiceLive()
+        ? <div className="notice">Calling is being switched on. You can look around, but getting a number and calling will open shortly.</div>
+        : <div className="notice">Calling is in test mode: you can try every step, but no real number is bought and no one is dialled.</div>)}
       {sp.error && <div className="notice notice-bad" role="alert">{sp.error}</div>}
       {sp.ok && <div className="notice notice-ok">{{ number: "Your number is ready. Your assistant now answers it.", released: "Number released.", agent: "Voice agent saved.", call: "Calling now. The result appears below.", campaign: `Campaign created.${sp.skipped ? ` ${sp.skipped} line(s) skipped (not a valid number).` : ""}` }[sp.ok] ?? "Saved."}</div>}
 
