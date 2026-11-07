@@ -8,6 +8,7 @@ import { offerLaunchVideos } from "@/lib/creative/launch-offer";
 import { importPendingSites } from "@/lib/creative/site-import";
 import { runHarveyFollowups, runHarveyCompetition } from "@/lib/harvey/agent";
 import { runVoiceCampaigns } from "@/lib/voice/service";
+import { runPendingProviderChecks } from "@/lib/provider-check";
 
 export const maxDuration = 300;
 
@@ -47,5 +48,6 @@ export async function POST(req: Request) {
   // Call campaigns: dial the next queued contacts within each campaign's concurrency and minutes cap.
   let voiceCalls = 0;
   try { voiceCalls = await runVoiceCampaigns(20_000); } catch (e) { console.error("[cron] voice campaigns failed", (e as Error).message); }
+  try { await runPendingProviderChecks(); } catch (e) { console.error("[cron] provider check failed", (e as Error).message); }
   return NextResponse.json({ voiceCalls, followups, broadcasts: (sending ?? []).length, creative, autopilot, launchOffers, sitesImported, harveyFollowups });
 }
