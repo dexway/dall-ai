@@ -1,5 +1,5 @@
 import "server-only";
-import type { VoiceId } from "@/lib/voice/rules";
+import { inventoryE164, isoFromCalling, type VoiceId } from "@/lib/voice/rules";
 
 // The two providers behind Dall AI calling, used only from the server and never shown to businesses:
 // the telecom provider (KrosAI: numbers, carrier, KYC, dialling) and the voice provider (Vapi: the
@@ -42,36 +42,59 @@ const unwrap = (j: Record<string, unknown>) => (j.data && typeof j.data === "obj
 
 // ---------- Telecom: numbers and dialling ----------
 
-export type AvailableNumber = { number: string; country: string; monthlyCost: string | null; capabilities: string[] };
+export type AvailableNumber = { raw: string; e164: string; country: string; monthlyCostUsd: number | null; capabilities: string[] };
 
+/**
+ * Numbers the business can buy in one country. The provider may return other countries when a country
+ * has no stock, so results are filtered to the country asked for. `raw` is the provider's own number
+ * string, which is what buying must send back.
+ */
 export async function searchNumbers(country: string, contains?: string): Promise<AvailableNumber[]> {
   if (!telecomLive()) {
-    const base = country === "NG" ? "+23420" : "+1555";
-    return [1, 2, 3, 4, 5].map((i) => ({ number: `${base}1000${String(i).padStart(3, "0")}`, country, monthlyCost: null, capabilities: ["voice", "test mode"] }));
+    const base = country === "NG" ? "20100" : "55510";
+    return [1, 2, 3, 4, 5].map((i) => { const raw = `${base}${String(i).padStart(5, "0")}`; return { raw, e164: inventoryE164(raw, country), country, monthlyCostUsd: null, capabilities: ["voice"] }; });
   }
-  const q = new URLSearchParams({ country_code: country, limit: "20" });
+  const q = new URLSearchParams({ country_code: country, limit: "30" });
   if (contains) q.set("contains", contains.replace(/\D/g, "").slice(0, 8));
   const j = await kros(`/phone-numbers/available?${q}`);
   const list = (Array.isArray(j) ? j : (j.data ?? j.numbers ?? j.items ?? [])) as Record<string, unknown>[];
-  return list.map((n) => ({
-    number: String(n.number ?? n.phone_number ?? n.e164 ?? ""),
-    country: String(n.country_code ?? country),
-    monthlyCost: pick(n, "monthly_cost", "monthly_price", "price"),
-    capabilities: Array.isArray(n.capabilities) ? (n.capabilities as unknown[]).map(String) : [],
-  })).filter((n) => n.number);
+  return list.map((n) => {
+    const raw = String(n.number ?? n.phone_number ?? n.e164 ?? "");
+    const rc = String(n.country_code ?? n.country ?? country).toUpperCase();
+    const iso = isoFromCalling(rc);
+    const cost = Number(n.monthly_cost ?? n.monthly_price ?? n.price);
+    return { raw, e164: inventoryE164(raw, iso), country: iso, monthlyCostUsd: Number.isFinite(cost) ? cost : null, capabilities: Array.isArray(n.capabilities) ? (n.capabilities as unknown[]).map(String) : [] };
+  }).filter((n) => n.raw && n.country === country);
 }
 
-/** Buys a number with its own SIP login (so the voice provider can carry its calls). */
-export async function buyNumber(e164: string, country: string): Promise<{ id: string; sip: { username: string; password: string; domain: string } | null }> {
-  if (!telecomLive()) return { id: `test_${e164.replace(/\D/g, "")}`, sip: { username: "test", password: "test", domain: "sip.test.invalid" } };
-  const bought = unwrap(await kros("/phone-numbers", { method: "POST", body: { number: e164, country_code: country, allow_inbound: true, allow_outbound: true, routing_mode: "direct_sip" } }));
+type Sip = { username: string; password: string; domain: string };
+const sipOf = (row: Record<string, unknown>): Sip | null => {
+  const username = pick(row, "sip_username", "sip_auth_username"), password = pick(row, "sip_password", "sip_auth_password");
+  const domain = pick(row, "sip_ip", "sip_ip_address", "sip_server_ip", "sip_domain", "sip_host");
+  return username && password && domain ? { username, password, domain } : null;
+};
+
+/** Buys a number (sending it exactly as the inventory listed it) in direct-SIP mode. Returns its id. */
+export async function buyNumber(raw: string, country: string): Promise<string> {
+  if (!telecomLive()) return `test_${raw.replace(/\D/g, "")}`;
+  const bought = unwrap(await kros("/phone-numbers", { method: "POST", body: { number: raw, country_code: country, allow_inbound: true, allow_outbound: true, routing_mode: "direct_sip" } }));
   const id = pick(bought, "id", "phone_number_id");
   if (!id) throw new VoiceProviderError("telecom", 502, "NO_ID", "The number was bought but no id came back.");
-  // VERIFY with live keys: the SIP fields' names on the number row (sip_username / sip_password / sip_domain).
-  let row = bought;
-  if (!pick(row, "sip_username", "sip_auth_username")) row = unwrap(await kros(`/phone-numbers/${id}`));
-  const username = pick(row, "sip_username", "sip_auth_username"), password = pick(row, "sip_password", "sip_auth_password"), domain = pick(row, "sip_domain", "sip_ip", "sip_host");
-  return { id, sip: username && password && domain ? { username, password, domain } : null };
+  return id;
+}
+
+/**
+ * The number's SIP login, which the voice provider uses to carry its calls. If the number has none yet,
+ * switch it to direct-SIP routing, which makes the provider generate one.
+ */
+export async function numberSip(id: string): Promise<Sip | null> {
+  if (!telecomLive() || id.startsWith("test_")) return { username: "test", password: "test", domain: "sip.test.invalid" };
+  let sip = sipOf(unwrap(await kros(`/phone-numbers/${id}`)));
+  if (!sip) {
+    await kros(`/phone-numbers/${id}/attach-endpoint`, { method: "POST", body: { routing_mode: "direct_sip" } });
+    sip = sipOf(unwrap(await kros(`/phone-numbers/${id}`)));
+  }
+  return sip;
 }
 
 export async function releaseNumber(id: string): Promise<void> {
@@ -79,12 +102,31 @@ export async function releaseNumber(id: string): Promise<void> {
   await kros(`/phone-numbers/${id}`, { method: "DELETE" });
 }
 
+/**
+ * The telecom account must hold the platform's voice-provider key to hand calls to the voice agents
+ * (KrosAI: Settings → Integrations → Vapi). Done once, server to server; the key is never shown.
+ */
+let voiceLinked = false;
+export async function ensureTelecomVoiceLink(): Promise<void> {
+  if (voiceLinked || !telecomLive() || !voiceLive()) return;
+  const j = await kros("/provider-integrations");
+  const list = (Array.isArray(j) ? j : (j.data ?? j.integrations ?? j.items ?? [])) as Record<string, unknown>[];
+  const vapiRow = list.find((i) => String(i.provider ?? "").toLowerCase() === "vapi");
+  if (!vapiRow || vapiRow.is_connected === false) {
+    await kros("/provider-integrations", { method: "POST", body: { provider: "vapi", display_name: "Dall AI voice", api_key: process.env.VAPI_API_KEY, is_connected: true } });
+  }
+  voiceLinked = true;
+}
+
 /** A route on the telecom side that hands calls on this number to the voice agent. */
 export async function createVoiceRoute(name: string, numberId: string, assistantId: string, voiceCredentialId: string | null): Promise<string> {
   if (!telecomLive()) return `test_route_${numberId}`;
   const j = unwrap(await kros("/endpoints", { method: "POST", body: {
     name: name.slice(0, 80), type: "vapi", status: "active", phone_number_ids: [numberId],
-    provider_config: { assistant_id: assistantId, ...(voiceCredentialId ? { sip_trunk_credential_id: voiceCredentialId } : {}) },
+    provider_config: {
+      assistant_id: assistantId, vapi_assistant_id: assistantId,
+      ...(voiceCredentialId ? { sip_trunk_credential_id: voiceCredentialId, vapi_sip_trunk_credential_id: voiceCredentialId, credential_id: voiceCredentialId } : {}),
+    },
   } }));
   const id = pick(j, "id", "endpoint_id");
   if (!id) throw new VoiceProviderError("telecom", 502, "NO_ID", "The call route was created but no id came back.");

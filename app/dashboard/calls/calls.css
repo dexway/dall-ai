@@ -1,0 +1,19 @@
+/* Calls: number cards */
+.vn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.vn-card { border: 1px solid var(--line, #e3e3df); border-radius: 14px; padding: 14px 16px; display: grid; gap: 8px; align-content: start; background: var(--paper, #fff); }
+.vn-card.pick:hover { border-color: var(--ink, #1d2420); }
+.vn-card.failed { border-color: #f0c9c4; background: #fdf6f5; }
+.vn-num { font-size: 18px; font-weight: 700; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.vn-meta { font-size: 13px; color: var(--ink-70, #5d6660); }
+.vn-status.active { color: #1d7a3a; font-weight: 600; }
+.vn-status.failed { color: #b3261e; font-weight: 600; }
+.vn-err { margin: 0; font-size: 13px; color: #b3261e; line-height: 1.4; }
+.vn-card .btn { justify-self: start; }
+.vn-search { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.vn-search .field { min-width: 180px; }
+/* Calls and campaigns lists */
+.vc-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.vc-list > li { border: 1px solid var(--line, #e3e3df); border-radius: 12px; padding: 12px 14px; background: var(--paper, #fff); margin: 0 !important; }
+.vc-list > li small.muted { display: inline-block; margin-left: 6px; }
+.vc-list audio { margin-top: 8px; }
+.vc-list details summary { cursor: pointer; font-size: 13px; margin-top: 6px; }

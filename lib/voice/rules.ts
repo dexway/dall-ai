@@ -88,3 +88,18 @@ ${a.instructions ? `\nHow the owner wants you to work:\n${a.instructions}\n` : "
 ${a.knowledge ? `\nBusiness knowledge (from their website and documents; quote prices and details from here, never invent):\n${a.knowledge.slice(0, 12000)}\n` : ""}
 Rules: never invent prices, availability or offers. Never ask for card numbers, PINs or passwords. If the person asks not to be called again, apologise, say they won't be called again, and end the call. If they want a person, say the team will call them back. Keep calls brief and polite.`;
 }
+
+const CALLING: Record<string, string> = { NG: "234", GH: "233", KE: "254", ZA: "27", GB: "44", US: "1", RW: "250", EG: "20", AE: "971" };
+const ISO_BY_CALLING = Object.fromEntries(Object.entries(CALLING).map(([iso, cc]) => [cc, iso]));
+/** "234" / "+234" / "NG" → "NG". */
+export const isoFromCalling = (c: string): string => ISO_BY_CALLING[c.replace(/\D/g, "")] ?? c.toUpperCase();
+
+/** A provider number string ("2018893052", "+2348012345678", "08012345678") in E.164 for its country. */
+export function inventoryE164(raw: string, country: string): string {
+  const d = raw.replace(/\D/g, "");
+  const cc = CALLING[country] ?? "";
+  if (raw.trim().startsWith("+")) return `+${d}`;
+  if (cc && d.startsWith(cc) && d.length > cc.length + 6) return `+${d}`;
+  if (cc && d.startsWith("0")) return `+${cc}${d.slice(1)}`;
+  return cc ? `+${cc}${d}` : `+${d}`;
+}

@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env";
 import { profileText, type BusinessProfile } from "@/lib/business-profile";
 import { voicePrompt, slotsFree, callStatus, type VoiceId } from "@/lib/voice/rules";
-import { buyNumber, connectNumberToVoice, createVoiceRoute, placeCall, upsertAssistant, releaseNumber, telecomLive, voiceLive, VoiceProviderError } from "@/lib/voice/providers";
+import { buyNumber, numberSip, connectNumberToVoice, createVoiceRoute, ensureTelecomVoiceLink, placeCall, upsertAssistant, releaseNumber, telecomLive, voiceLive, VoiceProviderError } from "@/lib/voice/providers";
 
 // Dall AI calling: numbers, the business's voice agent, single calls and call campaigns.
 
@@ -59,22 +59,49 @@ export async function syncVoiceAgent(workspaceId: string, opts: { name?: string;
 }
 
 /** Buys a number for the business and wires it to its voice agent (inbound answers, outbound dials). */
-export async function provisionNumber(workspaceId: string, userId: string, e164: string, country: string): Promise<string> {
+export async function provisionNumber(workspaceId: string, userId: string, e164: string, raw: string, country: string): Promise<string> {
   // Never buy a real number that can't be connected to a voice agent: both providers live, or both in test mode.
   if (telecomLive() !== voiceLive()) throw new Error("Calling isn't fully switched on yet. Please try again later.");
   const db = supabaseAdmin();
+  // Everything that can fail without spending money happens before the purchase.
+  await ensureTelecomVoiceLink();
+  await syncVoiceAgent(workspaceId);
   const { data: row, error } = await db.from("voice_numbers").insert({ workspace_id: workspaceId, e164, country, created_by: userId }).select("id").single();
   if (error) throw new Error(error.message.includes("duplicate") ? "That number is already taken." : error.message);
   try {
-    const agent = await syncVoiceAgent(workspaceId);
-    const bought = await buyNumber(e164, country);
-    await db.from("voice_numbers").update({ provider_number_id: bought.id }).eq("id", row.id);
-    const voice = await connectNumberToVoice(e164, bought.sip, agent.providerAssistantId);
-    const route = await createVoiceRoute(`Dall ${e164}`, bought.id, agent.providerAssistantId, voice.credentialId);
-    await db.from("voice_numbers").update({ status: "active", voice_credential_id: voice.credentialId, voice_phone_id: voice.phoneId, provider_endpoint_id: route, error: null }).eq("id", row.id);
-    return row.id;
+    const providerId = await buyNumber(raw, country);
+    await db.from("voice_numbers").update({ provider_number_id: providerId }).eq("id", row.id);
   } catch (e) {
     await db.from("voice_numbers").update({ status: "failed", error: friendlyError(e).slice(0, 300) }).eq("id", row.id);
+    throw e;
+  }
+  await connectVoiceNumber(workspaceId, row.id);
+  return row.id;
+}
+
+/**
+ * Connects a bought number to the business's voice agent (SIP login → voice provider → call route).
+ * Safe to run again: "Retry setup" uses it on a number that was bought but didn't finish connecting.
+ */
+export async function connectVoiceNumber(workspaceId: string, numberId: string): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: n } = await db.from("voice_numbers").select("id,e164,provider_number_id,voice_credential_id,voice_phone_id,provider_endpoint_id")
+    .eq("id", numberId).eq("workspace_id", workspaceId).single();
+  if (!n?.provider_number_id) throw new Error("This number wasn't bought. Remove it and pick another.");
+  try {
+    await ensureTelecomVoiceLink();
+    const agent = await syncVoiceAgent(workspaceId);
+    let { voice_credential_id: credentialId, voice_phone_id: phoneId } = n;
+    if (!phoneId) {
+      const sip = await numberSip(n.provider_number_id);
+      if (!sip) throw new Error("The phone service didn't provide this number's connection details yet. Try \"Retry setup\" in a few minutes.");
+      ({ credentialId, phoneId } = await connectNumberToVoice(n.e164, sip, agent.providerAssistantId));
+      await db.from("voice_numbers").update({ voice_credential_id: credentialId, voice_phone_id: phoneId }).eq("id", n.id);
+    }
+    const route = n.provider_endpoint_id ?? await createVoiceRoute(`Dall ${n.e164}`, n.provider_number_id, agent.providerAssistantId, credentialId);
+    await db.from("voice_numbers").update({ status: "active", provider_endpoint_id: route, error: null }).eq("id", n.id);
+  } catch (e) {
+    await db.from("voice_numbers").update({ status: "failed", error: friendlyError(e).slice(0, 300) }).eq("id", n.id);
     throw e;
   }
 }
