@@ -3,10 +3,11 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireWorkspace, canManage } from "@/lib/workspace";
+import "./calls.css";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { VOICES, VOICE_COUNTRIES, isVoice, parseContacts, toE164 } from "@/lib/voice/rules";
 import { searchNumbers, telecomLive, voiceLive, type AvailableNumber } from "@/lib/voice/providers";
-import { syncVoiceAgent, provisionNumber, releaseVoiceNumber, startSingleCall, runVoiceCampaigns, friendlyError } from "@/lib/voice/service";
+import { syncVoiceAgent, provisionNumber, connectVoiceNumber, releaseVoiceNumber, startSingleCall, runVoiceCampaigns, friendlyError } from "@/lib/voice/service";
 
 export const metadata = { title: "Calls" };
 export const maxDuration = 60;
@@ -16,6 +17,15 @@ export const maxDuration = 60;
 
 const TABS = [["numbers", "Numbers"], ["agent", "Voice agent"], ["calls", "Calls"], ["campaigns", "Campaigns"]] as const;
 const go = (tab: string, q = "") => redirect(`/dashboard/calls?tab=${tab}${q ? `&${q}` : ""}`);
+const STATUS_NUM: Record<string, string> = { active: "Active", provisioning: "Setting up…", failed: "Didn't work", paused: "Paused" };
+const countryName = (c: string) => VOICE_COUNTRIES.find(([k]) => k === c)?.[1] ?? c;
+/** "+2348012345678" → "+234 801 234 5678"; "+12018893052" → "+1 201 889 3052". */
+function prettyPhone(e: string): string {
+  const d = e.replace(/[^0-9]/g, "");
+  const cc = ["234", "233", "254", "27", "44", "1"].find((c) => d.startsWith(c)) ?? "";
+  const rest = d.slice(cc.length);
+  return `+${cc} ${[rest.slice(0, 3), rest.slice(3, 6), rest.slice(6)].filter(Boolean).join(" ")}`.trim();
+}
 const STATUS_LABEL: Record<string, string> = { queued: "Waiting", dialing: "Ringing", in_progress: "On the call", completed: "Completed", no_answer: "No answer", busy: "Busy", failed: "Failed", cancelled: "Cancelled" };
 
 async function manager() {
@@ -29,10 +39,20 @@ const rethrowRedirect = (e: unknown) => { if ((e as { digest?: string }).digest?
 async function buy(formData: FormData) {
   "use server";
   const ctx = await manager();
-  const e164 = toE164(String(formData.get("number") ?? ""), "US");
-  const country = String(formData.get("country") ?? "NG");
-  if (!e164 || formData.get("confirm") !== "yes") go("numbers", "error=Tick+the+box+to+confirm+you+want+this+number.");
-  try { await provisionNumber(ctx.workspace.id, ctx.user.id, e164!, country); }
+  const raw = String(formData.get("raw") ?? "").trim().slice(0, 32);
+  const e164 = toE164(String(formData.get("e164") ?? ""), "US");
+  const country = String(formData.get("country") ?? "");
+  if (!raw || !e164 || !VOICE_COUNTRIES.some(([c]) => c === country)) go("numbers", "error=That+number+couldn't+be+read.+Search+again.");
+  try { await provisionNumber(ctx.workspace.id, ctx.user.id, e164!, raw, country); }
+  catch (e) { rethrowRedirect(e); fail("numbers", e); }
+  revalidatePath("/dashboard/calls");
+  go("numbers", "ok=number");
+}
+
+async function retry(formData: FormData) {
+  "use server";
+  const ctx = await manager();
+  try { await connectVoiceNumber(ctx.workspace.id, String(formData.get("id") ?? "")); }
   catch (e) { rethrowRedirect(e); fail("numbers", e); }
   revalidatePath("/dashboard/calls");
   go("numbers", "ok=number");
@@ -115,7 +135,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
   const db = supabaseAdmin();
   const ws = ctx.workspace.id;
   const [{ data: numbers, error: setupErr }, { data: agent }, { data: calls }, { data: campaigns }] = await Promise.all([
-    db.from("voice_numbers").select("id,e164,country,status,error,created_at").eq("workspace_id", ws).neq("status", "released").order("created_at", { ascending: false }),
+    db.from("voice_numbers").select("id,e164,country,status,error,created_at,provider_number_id").eq("workspace_id", ws).neq("status", "released").order("created_at", { ascending: false }),
     db.from("voice_agents").select("name,voice,first_message,instructions,synced_at").eq("workspace_id", ws).maybeSingle(),
     db.from("voice_calls").select("id,to_e164,contact_name,status,duration_s,summary,transcript,recording_url,error,created_at,campaign_id").eq("workspace_id", ws).order("created_at", { ascending: false }).limit(50),
     db.from("voice_campaigns").select("id,name,status,goal,max_minutes,minutes_used,max_concurrent,created_at").eq("workspace_id", ws).order("created_at", { ascending: false }).limit(20),
@@ -151,35 +171,39 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
         <>
           <section className="panel">
             <h2>Your numbers</h2>
-            {!(numbers ?? []).length && <p className="muted">No number yet. Find one below.</p>}
-            <ul className="ci-list">{(numbers ?? []).map((n) => (
-              <li key={n.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <b>{n.e164}</b> <small className="muted">{n.country} · {n.status === "active" ? "Active" : n.status === "provisioning" ? "Setting up…" : "Failed"}</small>
-                {n.error && <small style={{ color: "#a33" }}>{n.error}</small>}
-                <form action={release}><input type="hidden" name="id" value={n.id} /><button className="btn btn-line btn-sm">Release</button></form>
-              </li>
-            ))}</ul>
+            {!(numbers ?? []).length && <p className="muted">No number yet. Pick one below.</p>}
+            <div className="vn-grid">{(numbers ?? []).map((n) => (
+              <div key={n.id} className={`vn-card ${n.status}`}>
+                <div className="vn-num">{prettyPhone(n.e164)}</div>
+                <div className="vn-meta">{countryName(n.country)} · <span className={`vn-status ${n.status}`}>{STATUS_NUM[n.status] ?? n.status}</span></div>
+                {n.error && <p className="vn-err">{n.error}</p>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {n.status === "failed" && n.provider_number_id && <form action={retry}><input type="hidden" name="id" value={n.id} /><button className="btn btn-lime btn-sm">Retry setup</button></form>}
+                  <form action={release}><input type="hidden" name="id" value={n.id} /><button className="btn btn-line btn-sm">{n.status === "active" || n.provider_number_id ? "Release number" : "Remove"}</button></form>
+                </div>
+              </div>
+            ))}</div>
           </section>
           <section className="panel">
             <h2>Get a number</h2>
-            <form method="get" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+            <p className="muted">Pick a country, choose a number, and your voice agent answers it straight away.</p>
+            <form method="get" className="vn-search">
               <input type="hidden" name="tab" value="numbers" />
               <label className="field"><span>Country</span><select name="country" className="input" defaultValue={sp.country ?? "NG"}>{VOICE_COUNTRIES.map(([c, l]) => <option key={c} value={c}>{l}</option>)}</select></label>
-              <label className="field"><span>Contains digits (optional)</span><input name="contains" className="input" inputMode="numeric" maxLength={8} defaultValue={sp.contains ?? ""} /></label>
-              <button className="btn btn-ink">Show available numbers</button>
+              <label className="field"><span>Contains digits (optional)</span><input name="contains" className="input" inputMode="numeric" maxLength={8} defaultValue={sp.contains ?? ""} placeholder="e.g. 777" /></label>
+              <button className="btn btn-ink">Show numbers</button>
             </form>
             {searchError && <p className="notice notice-bad">{searchError}</p>}
-            {sp.country && !searchError && !available.length && <p className="muted">No numbers available right now. Try another country.</p>}
-            {available.length > 0 && <ul className="ci-list" style={{ marginTop: 12 }}>{available.map((a) => (
-              <li key={a.number}>
-                <form action={buy} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <input type="hidden" name="number" value={a.number} /><input type="hidden" name="country" value={a.country} />
-                  <b>{a.number}</b>{a.monthlyCost && <small className="muted">{a.monthlyCost}/month</small>}
-                  <label style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 13 }}><input type="checkbox" name="confirm" value="yes" /> I want this number</label>
-                  <button className="btn btn-lime btn-sm">Get this number</button>
-                </form>
-              </li>
-            ))}</ul>}
+            {sp.country && !searchError && !available.length && <p className="notice">No {countryName(sp.country)} numbers are available right now. Try another country or check back soon.</p>}
+            {available.length > 0 && <div className="vn-grid" style={{ marginTop: 14 }}>{available.map((a) => (
+              <form key={a.raw} action={buy} className="vn-card pick">
+                <input type="hidden" name="raw" value={a.raw} /><input type="hidden" name="e164" value={a.e164} /><input type="hidden" name="country" value={a.country} />
+                <div className="vn-num">{prettyPhone(a.e164)}</div>
+                <div className="vn-meta">{countryName(a.country)}{a.monthlyCostUsd != null ? ` · $${a.monthlyCostUsd.toFixed(2)}/month` : ""}</div>
+                <button className="btn btn-lime btn-sm">Get this number</button>
+              </form>
+            ))}</div>}
+            {available.length > 0 && <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Getting a number charges the monthly price straight away. You can release it any time.</p>}
           </section>
         </>
       )}
@@ -216,7 +240,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
           <section className="panel">
             <h2>Recent calls</h2>
             {!(calls ?? []).length && <p className="muted">No calls yet.</p>}
-            <ul className="ci-list">{(calls ?? []).map((c) => (
+            <ul className="vc-list">{(calls ?? []).map((c) => (
               <li key={c.id} style={{ marginBottom: 10 }}>
                 <b>{c.contact_name ? `${c.contact_name} · ` : ""}{c.to_e164}</b> <small className="muted">{STATUS_LABEL[c.status] ?? c.status}{c.duration_s ? ` · ${Math.floor(c.duration_s / 60)}m ${c.duration_s % 60}s` : ""} · {new Date(c.created_at).toLocaleString("en-NG", { dateStyle: "short", timeStyle: "short" })}</small>
                 {c.error && <><br /><small style={{ color: "#a33" }}>{c.error}</small></>}
@@ -254,7 +278,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
           <section className="panel">
             <h2>Campaigns</h2>
             {!(campaigns ?? []).length && <p className="muted">No campaigns yet.</p>}
-            <ul className="ci-list">{(campaigns ?? []).map((c) => {
+            <ul className="vc-list">{(campaigns ?? []).map((c) => {
               const n = counts.get(c.id) ?? {};
               return (
                 <li key={c.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>

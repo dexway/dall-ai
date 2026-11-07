@@ -44,3 +44,15 @@ test("provider statuses map to ours; the voice prompt is phone-style and carries
   assert.match(p, /Goal of this call: Book a room/);
   assert.ok(isVoice("female_ng") && !isVoice("robot"));
 });
+
+test("provider inventory numbers: E.164 per country; the raw string is kept for buying", async () => {
+  const { inventoryE164, isoFromCalling } = await import("../lib/voice/rules.ts");
+  assert.equal(inventoryE164("2018893052", "US"), "+12018893052");      // what the US inventory actually returned
+  assert.equal(inventoryE164("12018893052", "US"), "+12018893052");
+  assert.equal(inventoryE164("+233596993517", "GH"), "+233596993517");
+  assert.equal(inventoryE164("08012345678", "NG"), "+2348012345678");
+  assert.equal(inventoryE164("2348012345678", "NG"), "+2348012345678");
+  assert.equal(isoFromCalling("234"), "NG");
+  assert.equal(isoFromCalling("+1"), "US");
+  assert.equal(isoFromCalling("ng"), "NG");
+});
