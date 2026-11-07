@@ -11,7 +11,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 ## Commands
 - `npm test` — node --test with --experimental-strip-types (pglite runs every migration). No TS parameter properties in files tests import.
 - `npx tsc --noEmit -p .` and `npx next build` before pushing.
-- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0032 are applied in production.
+- Migrations live in `supabase/migrations/NNNN_*.sql`; 0001–0030 and 0031 are applied in production (0032, 0033 pending).
 
 ## Map
 - Channels: `lib/channels/{events,send,process}.ts`, webhooks in `app/api/webhooks/*`.
@@ -22,6 +22,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 - Creative Studio (add-on inside Content Creator): `lib/culture/*` (schemas = pure checks, research.ts = orchestrator), tab `app/dashboard/studio/culture`, review at `app/admin/culture`; shared knowledge is trusted only after admin approval.
 - Calls (AI phone): `lib/voice/rules.ts` (pure), `providers.ts` (KrosAI numbers/dialling + Vapi voice agent, platform accounts, test mode without keys), `service.ts` (provision, dial, campaigns, call events); UI `app/dashboard/calls`; webhook `app/api/webhooks/voice`; campaigns also advance from the 5-min cron. Businesses never see the providers.
 - Content Creator / Creative Director: `lib/creative/*` (router.ts picks the best enabled model per task), UI `app/dashboard/studio`, admin `app/admin/creative`.
+- WhatsApp via Kapso ("Get WhatsApp in minutes", platform Kapso project, key `KAPSOAIAPKIKEY`/`KAPSO_API_KEY`): `lib/channels/kapso.ts` (customers, branded setup links, number lookup, Meta-format webhook relay); numbers are normal `channel_connections` rows with token `kapso-managed`, and `send.ts` `waApi()` routes them to Kapso's Meta-compatible API; return route `app/api/whatsapp/connected` verifies ownership.
 - Cron: pg_cron calls `/api/cron/marketing` every 5 min (Vault secret); Vercel cron `/api/cron/daily` uses `CRON_SECRET`.
 - Security: `lib/rate-limit.ts`, `lib/net-guard.ts` (SSRF), CSP report-only and Permissions-Policy in `next.config.ts`.
 
