@@ -9,6 +9,8 @@ import { syncWorkspaceAds } from "@/lib/ads-sync";
 import { adFunnel } from "@/lib/funnel";
 import { AD_STEPS, explainAdError, parseStoredFailure, type AdFailure } from "@/lib/ad-errors";
 import AdBuilder from "./AdBuilder";
+import { generateCopy } from "@/lib/marketing";
+import { GatewayError } from "@/lib/ai/gateway";
 
 export const metadata = { title: "Ads" };
 
@@ -93,6 +95,22 @@ async function launchAd(formData: FormData) {
   await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, actor_id: ctx.user.id, action: "ads.campaign_created", entity: "ad_campaign", entity_id: ids.campaignId, details: { destination, budget_minor: budget * 100, product: item?.name, audience } });
   revalidatePath("/dashboard/ads");
   redirect("/dashboard/ads?saved=launched");
+}
+
+// Writes the ad's headline and text from the product and the business's real facts (Marketing's copy writer).
+async function writeAdCopy(itemId: string): Promise<{ headline: string; message: string } | { error: string }> {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) return { error: "Only owners and admins can write ads." };
+  const { data: item } = await supabaseAdmin().from("catalogue_items").select("name,price_kobo,intro_price_kobo,description")
+    .eq("workspace_id", ctx.workspace.id).eq("id", itemId).maybeSingle();
+  try {
+    const pack = await generateCopy({ workspaceId: ctx.workspace.id, userId: ctx.user.id, businessName: ctx.workspace.name, goal: "get people to tap the ad and start a chat to order",
+      item: item ? { name: item.name, price: item.intro_price_kobo ?? item.price_kobo, description: item.description } : null });
+    return { headline: pack.headline, message: pack.ad_text };
+  } catch (e) {
+    return { error: e instanceof GatewayError ? e.message : "The AI couldn't write copy just now. Please try again." };
+  }
 }
 
 async function clearFailed() {
@@ -250,7 +268,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       ) : (
         <section className="panel">
           <h2>Boost a product</h2>
-          <AdBuilder accounts={accounts.map((a) => ({ ad_account_id: a.ad_account_id, name: a.name, currency: a.currency }))} pages={(pages ?? []).map((p) => ({ external_id: p.external_id, display_name: p.display_name }))} items={itemsForBuilder} action={launchAd} initialMessage={sp.prefill} initialHeadline={sp.headline} />
+          <AdBuilder accounts={accounts.map((a) => ({ ad_account_id: a.ad_account_id, name: a.name, currency: a.currency }))} pages={(pages ?? []).map((p) => ({ external_id: p.external_id, display_name: p.display_name }))} items={itemsForBuilder} action={launchAd} writeCopy={writeAdCopy} initialMessage={sp.prefill} initialHeadline={sp.headline} />
         </section>
       )}
 

@@ -58,13 +58,15 @@ export default function ChatBox({ slug, business, agent }: Props) {
     try {
       const s = JSON.parse(localStorage.getItem(key) ?? "null");
       if (s?.ids) {
-        setIds(s.ids); setMsgs(s.msgs);
+        // Older versions could save one team reply many times over; show each run of repeats once.
+        setIds(s.ids); setMsgs((s.msgs as Msg[]).filter((m, i, all) => !(m.role === "human" && i > 0 && all[i - 1].role === "human" && all[i - 1].text === m.text)));
         fetch(`/api/agent/${slug}/chat?c=${s.ids.conversationId}&v=${s.ids.visitorToken}`).then((r) => r.json()).then((b) => setPending(b.pending ?? null)).catch(() => {});
       }
     } catch { /* fresh chat */ }
   }, [key, slug]);
   // Poll for replies a team member types in the inbox (every 15s while the chat is open).
   const lastSeen = useRef<string>(new Date().toISOString());
+  const seenTeam = useRef(new Set<string>());
   useEffect(() => {
     if (!ids.conversationId) return;
     const t = setInterval(async () => {
@@ -74,7 +76,10 @@ export default function ChatBox({ slug, business, agent }: Props) {
         if (b.pending !== undefined) setPending(b.pending);
         if (b.team?.length) {
           lastSeen.current = b.team[b.team.length - 1].at;
-          setMsgs((m) => [...m, ...b.team.map((x: { text: string }) => ({ role: "human" as const, text: x.text }))]);
+          // Skip a team reply that's already on screen (by its time), so a repeat poll can't duplicate it.
+          const fresh = (b.team as { text: string; at: string }[]).filter((x) => !seenTeam.current.has(x.at));
+          fresh.forEach((x) => seenTeam.current.add(x.at));
+          if (fresh.length) setMsgs((m) => [...m, ...fresh.map((x) => ({ role: "human" as const, text: x.text }))]);
         }
       } catch { /* offline: try next tick */ }
     }, 15_000);

@@ -16,11 +16,14 @@ const AUDIENCES: { value: string; label: string }[] = [
 
 const CTA: Record<string, string> = { whatsapp: "Send WhatsApp message", messenger: "Send message", instagram: "Send message" };
 
-export default function AdBuilder({ accounts, pages, items, action, initialMessage, initialHeadline }: {
+export default function AdBuilder({ accounts, pages, items, action, writeCopy, initialMessage, initialHeadline }: {
   accounts: Account[]; pages: Page[]; items: Item[];
   action: (formData: FormData) => void;
+  writeCopy: (itemId: string) => Promise<{ headline: string; message: string } | { error: string }>;
   initialMessage?: string; initialHeadline?: string;
 }) {
+  const [writing, setWriting] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState(accounts[0]?.ad_account_id ?? "");
   const [itemId, setItemId] = useState(items[0]?.id ?? "");
   const [destination, setDestination] = useState("whatsapp");
@@ -104,6 +107,18 @@ export default function AdBuilder({ accounts, pages, items, action, initialMessa
         <label>Photo <span style={{ color: "var(--ink-70)", fontSize: 12 }}>(optional — upload a different one, otherwise we use the product photo)</span><br />
           <input name="media" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => { const f = e.target.files?.[0]; setUpload(f ? URL.createObjectURL(f) : null); }} />
         </label>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button type="button" className="btn btn-line btn-sm" disabled={writing} onClick={async () => {
+            setWriting(true); setCopyError(null);
+            try {
+              const r = await writeCopy(itemId);
+              if ("error" in r) setCopyError(r.error); else { setHeadline(r.headline.slice(0, 40)); setMessage(r.message.slice(0, 600)); }
+            } catch { setCopyError("The AI couldn't write copy just now. Please try again."); }
+            setWriting(false);
+          }}>{writing ? "Writing…" : "✨ Write headline and text with AI"}</button>
+          {copyError && <span role="alert" style={{ color: "var(--bad, #b3261e)", fontSize: 13 }}>{copyError}</span>}
+        </div>
 
         <label>Ad text<br />
           <textarea name="message" rows={3} maxLength={600} value={message} onChange={(e) => setMessage(e.target.value)} required style={{ width: "100%" }} />
