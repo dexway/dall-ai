@@ -104,3 +104,13 @@ test("the agent's lead upsert (on conflict conversation_id) updates the chat's o
   assert.deepEqual(rows.map((r) => r.interest), ["wedding hall for 250"]);
   await db.query(`insert into leads (workspace_id, interest) values ($1,'walk-in'), ($1,'phone call')`, [wsA]);   // no chat: still allowed
 });
+
+test("calls: a business sees only its own numbers and calls, and can't write them directly", async () => {
+  const n = (await one(`insert into voice_numbers (workspace_id, e164, status) values ($1,'+2342010000001','active') returning id`, [wsA])).id;
+  await db.query(`insert into voice_calls (workspace_id, number_id, to_e164) values ($1,$2,'+2348031234567')`, [wsA, n]);
+  const seenByB = await as(B, async () => (await db.query(`select count(*)::int c from voice_calls`)).rows[0].c + (await db.query(`select count(*)::int c from voice_numbers`)).rows[0].c);
+  assert.equal(seenByB, 0);
+  const seenByA = await as(A, async () => (await db.query(`select count(*)::int c from voice_calls`)).rows[0].c);
+  assert.equal(seenByA, 1);
+  await assert.rejects(as(A, () => db.query(`insert into voice_calls (workspace_id, to_e164) values ($1,'+2348000000000')`, [wsA])));
+});

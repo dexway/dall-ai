@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/dashboard/payments", label: "Payments to check" },
   { href: "/dashboard/connect", label: "Channels" },
   { href: "/dashboard/harvey", label: "Harvey · Sales agent" },
+  { href: "/dashboard/calls", label: "Calls" },
   { href: "/dashboard/marketing", label: "Marketing" },
   { href: "/dashboard/studio", label: "Content Creator" },
   { href: "/dashboard/ads", label: "Ads" },

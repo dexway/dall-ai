@@ -20,6 +20,7 @@ bank-transfer orders and check receipts; the owner always confirms payments.
 - Marketing: `lib/marketing.ts` (follow-ups, broadcasts), `lib/promo.ts`, autopilot in `lib/autopilot.ts`, social posting in `lib/social-publish.ts`.
 - Harvey sales agent (ethanplusai/harvey, MIT): prompts+skills verbatim in `lib/harvey/harvey-skills.ts`, gate in `gate.ts`, account data in `context.ts`, agents in `agent.ts`, signals in `signals.ts`, UI `app/dashboard/harvey` (prospects, competitors, messages; owner sends every message).
 - Creative Studio (add-on inside Content Creator): `lib/culture/*` (schemas = pure checks, research.ts = orchestrator), tab `app/dashboard/studio/culture`, review at `app/admin/culture`; shared knowledge is trusted only after admin approval.
+- Calls (AI phone): `lib/voice/rules.ts` (pure), `providers.ts` (KrosAI numbers/dialling + Vapi voice agent, platform accounts, test mode without keys), `service.ts` (provision, dial, campaigns, call events); UI `app/dashboard/calls`; webhook `app/api/webhooks/voice`; campaigns also advance from the 5-min cron. Businesses never see the providers.
 - Content Creator / Creative Director: `lib/creative/*` (router.ts picks the best enabled model per task), UI `app/dashboard/studio`, admin `app/admin/creative`.
 - Cron: pg_cron calls `/api/cron/marketing` every 5 min (Vault secret); Vercel cron `/api/cron/daily` uses `CRON_SECRET`.
 - Security: `lib/rate-limit.ts`, `lib/net-guard.ts` (SSRF), CSP report-only and Permissions-Policy in `next.config.ts`.
@@ -37,4 +38,5 @@ bank-transfer orders and check receipts; the owner always confirms payments.
    App Review (use /privacy and /data-deletion); reconnect.
 5. Higgsfield keys; confirm model prices in /admin/creative, enable models, set the platform media cap.
 6. Confirm the contact address (currently hello@dall.ai, override with `NEXT_PUBLIC_SUPPORT_EMAIL`).
-7. Later: custom email sender (Resend), custom domain, enforce CSP, full retest once AI credit is back.
+7. Calls: `KROSAI_API_KEY` (KYC done, balance topped up) and `VAPI_API_KEY` in Vercel; register the KrosAI webhook to `/api/webhooks/voice?s=<secret>`; verify the SIP fields on a first real number; pick Nigerian voices via `VOICE_MAP`.
+8. Later: custom email sender (Resend), custom domain, enforce CSP, full retest once AI credit is back.
