@@ -49,3 +49,22 @@ test("status-only webhooks (delivery receipts) produce no messages", () => {
   assert.deepEqual(parseInbound(payload), []);
   assert.deepEqual(parseInbound(null), []);
 });
+
+test("Kapso-managed numbers send through Kapso's Meta-compatible API with the platform key; others go to Meta", async () => {
+  const { sendText: send, KAPSO_TOKEN: K } = await import("../lib/channels/send.ts");
+  process.env.KAPSOAIAPKIKEY = "kp_test";
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  const fetcher = (async (url: string, init: RequestInit) => {
+    seen.push({ url, headers: init.headers as Record<string, string> });
+    return new Response(JSON.stringify({ messages: [{ id: "wamid.1" }] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const r = await send({ provider: "whatsapp", token: K, accountId: "123", to: "2348031234567", text: "hi", fetcher });
+  assert.equal(r.providerMessageId, "wamid.1");
+  assert.equal(seen[0].url, "https://api.kapso.ai/meta/whatsapp/v24.0/123/messages");
+  assert.equal(seen[0].headers["X-API-Key"], "kp_test");
+  assert.equal(seen[0].headers.Authorization, undefined);
+  await send({ provider: "whatsapp", token: "EAAmeta", accountId: "123", to: "2348031234567", text: "hi", fetcher });
+  assert.match(seen[1].url, /^https:\/\/graph\.facebook\.com\/v\d+\.\d+\/123\/messages$/);
+  assert.equal(seen[1].headers.Authorization, "Bearer EAAmeta");
+  delete process.env.KAPSOAIAPKIKEY;
+});

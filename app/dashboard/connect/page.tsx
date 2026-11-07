@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { encryptSecret } from "@/lib/crypto";
 import { exchangeEmbeddedSignupCode, subscribeWaba, phoneNumberInfo } from "@/lib/meta";
 import ConnectWhatsApp from "./ConnectWhatsApp";
+import { kapsoLive, createKapsoCustomer, createSetupLink } from "@/lib/channels/kapso";
 
 export const metadata = { title: "Channels" };
 
@@ -89,6 +90,30 @@ async function connectWhatsApp(formData: FormData) {
   await db.from("financial_audit_logs").insert({ workspace_id: ctx.workspace.id, actor_id: ctx.user.id, action: "channel.whatsapp_connected", entity: "workspace", entity_id: ctx.workspace.id, details: { phone_number_id: phoneId } });
   revalidatePath("/dashboard/connect");
   back("whatsapp", "saved=connected");
+}
+
+// Get WhatsApp in minutes: open a Dall AI-branded setup page that connects the business's current
+// WhatsApp Business number, or gives them a new one. /api/whatsapp/connected finishes the connection.
+async function getWhatsApp(formData: FormData) {
+  "use server";
+  const ctx = await requireWorkspace();
+  if (!canManage(ctx)) back("whatsapp", "error=role");
+  const mode = formData.get("mode") === "new" ? "new" : "existing";
+  const db = supabaseAdmin();
+  let url = "";
+  try {
+    const { data: ws } = await db.from("workspaces").select("kapso_customer_id").eq("id", ctx.workspace.id).single();
+    let customerId = ws?.kapso_customer_id as string | null;
+    if (!customerId) {
+      customerId = await createKapsoCustomer(ctx.workspace.name, ctx.workspace.id);
+      await db.from("workspaces").update({ kapso_customer_id: customerId }).eq("id", ctx.workspace.id);
+    }
+    url = await createSetupLink(customerId, mode);
+  } catch (e) {
+    console.error("[whatsapp] setup link failed", (e as Error).message);
+    back("whatsapp", "error=setup");
+  }
+  redirect(url);
 }
 
 async function setChannelStatus(formData: FormData) {
@@ -198,6 +223,7 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
     missing: "Meta did not return the number details. Try again and finish every step in the Meta window.",
     taken: "This account is already connected to another business.",
     meta: "Meta did not accept the connection. Check the app setup, then try again.",
+    setup: "WhatsApp setup didn't finish. Start again when you're ready; nothing was charged.",
     save: "Couldn't save the change. Try again.",
     cancelled: "The Facebook login was cancelled. Start again when you're ready.",
     state: "That login link expired or was changed. Start again from this page.",
@@ -285,6 +311,15 @@ export default async function ConnectPage({ searchParams }: { searchParams: Prom
       <p style={{ color: "var(--ink-70)", maxWidth: 480, margin: "0 auto 6px", lineHeight: 1.55 }}>{def.pitch}</p>
       {def.learn && <p style={{ margin: "0 0 18px" }}><a href={def.learn} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>Learn more</a></p>}
       {def.avail === "soon" ? <Badge text="Coming soon" tone="grey" />
+        : def.key === "whatsapp" && kapsoLive() ? (
+            <form action={getWhatsApp} style={{ display: "grid", gap: 10, justifyItems: "center" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                <button className="btn btn-lime" name="mode" value="existing">Use my WhatsApp Business number</button>
+                <button className="btn btn-line" name="mode" value="new">Give me a new WhatsApp number</button>
+              </div>
+              <small style={{ color: "var(--ink-70)", maxWidth: 420 }}>About 5 minutes: log in with Facebook and confirm. Using your current number keeps your WhatsApp Business app working alongside your assistant.</small>
+            </form>
+          )
         : def.key === "whatsapp" ? (appId && configId
             ? <div style={{ display: "inline-block" }}><ConnectWhatsApp appId={appId} configId={configId} action={connectWhatsApp} /></div>
             : <div style={{ display: "grid", gap: 8, justifyItems: "center" }}>

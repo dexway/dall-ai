@@ -4,6 +4,18 @@ import type { Provider } from "@/lib/channels/events";
 
 const graph = () => `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || process.env.WHATSAPP_GRAPH_VERSION || "v26.0"}`;
 
+/**
+ * Stored as the "token" of WhatsApp numbers connected through Kapso (Get WhatsApp in minutes). Those
+ * numbers send through Kapso's Meta-compatible API with the platform's Kapso key instead of a Meta token.
+ */
+export const KAPSO_TOKEN = "kapso-managed";
+const KAPSO_META = "https://api.kapso.ai/meta/whatsapp/v24.0";
+const kapsoKey = () => process.env.KAPSO_API_KEY || process.env.KAPSOAIAPKIKEY || "";
+/** Base URL and auth headers for a WhatsApp token: Meta's Graph API, or Kapso for Kapso-managed numbers. */
+export const waApi = (token: string): { base: string; headers: Record<string, string> } => token === KAPSO_TOKEN
+  ? { base: KAPSO_META, headers: { "X-API-Key": kapsoKey() } }
+  : { base: graph(), headers: { Authorization: `Bearer ${token}` } };
+
 export class SendError extends Error {
   status: number; retryable: boolean;
   constructor(message: string, status: number, retryable: boolean) { super(message); this.status = status; this.retryable = retryable; }
@@ -12,7 +24,7 @@ export class SendError extends Error {
 /** POST with one retry on rate limits (429) and server errors (5xx). */
 export async function postWithRetry(url: string, token: string, body: unknown, fetcher: typeof fetch = fetch, waitMs = 800): Promise<Record<string, unknown>> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetcher(url, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetcher(url, { method: "POST", headers: { ...waApi(token).headers, "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const text = await res.text();
     if (res.ok) { try { return JSON.parse(text); } catch { return {}; } }
     const retryable = res.status === 429 || res.status >= 500;
@@ -29,7 +41,7 @@ export type SendArgs = {
 /** Sends free-form text. Check replyWindow() first; Meta rejects free-form text outside the window. */
 export async function sendText(a: SendArgs): Promise<{ providerMessageId: string | null }> {
   if (a.provider === "whatsapp") {
-    const r = await postWithRetry(`${graph()}/${a.accountId}/messages`, a.token, {
+    const r = await postWithRetry(`${waApi(a.token).base}/${a.accountId}/messages`, a.token, {
       messaging_product: "whatsapp", to: a.to, type: "text", text: { body: a.text.slice(0, 4000), preview_url: false },
     }, a.fetcher);
     return { providerMessageId: (r.messages as { id?: string }[] | undefined)?.[0]?.id ?? null };
@@ -44,7 +56,7 @@ export async function sendText(a: SendArgs): Promise<{ providerMessageId: string
 /** WhatsApp approved template (needed more than 24h after the customer's last message). */
 export async function sendTemplate(a: { token: string; phoneNumberId: string; to: string; name: string; language: string; params?: string[]; fetcher?: typeof fetch }): Promise<{ providerMessageId: string | null }> {
   const components = a.params?.length ? [{ type: "body", parameters: a.params.map((text) => ({ type: "text", text })) }] : undefined;
-  const r = await postWithRetry(`${graph()}/${a.phoneNumberId}/messages`, a.token, {
+  const r = await postWithRetry(`${waApi(a.token).base}/${a.phoneNumberId}/messages`, a.token, {
     messaging_product: "whatsapp", to: a.to, type: "template", template: { name: a.name, language: { code: a.language }, ...(components ? { components } : {}) },
   }, a.fetcher);
   return { providerMessageId: (r.messages as { id?: string }[] | undefined)?.[0]?.id ?? null };
@@ -59,7 +71,7 @@ export function templateVars(body: string): number | null {
 
 /** Approved templates on a WhatsApp Business Account, for the inbox's template picker. */
 export async function listTemplates(token: string, wabaId: string, fetcher: typeof fetch = fetch): Promise<{ name: string; language: string; body: string; vars: number | null }[]> {
-  const res = await fetcher(`${graph()}/${wabaId}/message_templates?status=APPROVED&limit=50&fields=name,language,components`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetcher(`${waApi(token).base}/${wabaId}/message_templates?status=APPROVED&limit=50&fields=name,language,components`, { headers: waApi(token).headers });
   if (!res.ok) throw new SendError(`templates failed ${res.status}: ${(await res.text()).slice(0, 200)}`, res.status, false);
   const j = (await res.json()) as { data?: { name: string; language: string; components?: { type: string; text?: string }[] }[] };
   return (j.data ?? []).map((t) => { const body = t.components?.find((c) => c.type === "BODY")?.text ?? ""; return { name: t.name, language: t.language, body, vars: templateVars(body) }; });

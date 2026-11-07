@@ -2,10 +2,12 @@ import { after } from "next/server";
 import { signatureValid } from "@/lib/channels/whatsapp-parse";
 import { parseWhatsAppEvents } from "@/lib/channels/events";
 import { ingestEvents } from "@/lib/channels/process";
+import { kapsoSignatureValid } from "@/lib/channels/kapso";
 
 export const maxDuration = 60;
 
-// Meta calls this once to verify the URL (GET), then posts every customer message and delivery status here (POST).
+// Meta (or Kapso, for numbers set up through Dall AI) posts every customer message and delivery status here (POST).
+// Meta calls GET once to verify the URL.
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const expected = process.env.WHATSAPP_VERIFY_TOKEN;
@@ -17,7 +19,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const raw = await req.text();
-  if (!signatureValid(raw, req.headers.get("x-hub-signature-256"), process.env.META_APP_SECRET ?? "")) {
+  // Meta signs with the app secret; Kapso (Get WhatsApp in minutes) relays the same Meta payload signed with Dall AI's Kapso secret.
+  const fromMeta = signatureValid(raw, req.headers.get("x-hub-signature-256"), process.env.META_APP_SECRET ?? "");
+  if (!fromMeta && !kapsoSignatureValid(raw, req.headers.get("x-webhook-signature"))) {
     return new Response("bad signature", { status: 401 });
   }
   let body: unknown;
