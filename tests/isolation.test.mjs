@@ -106,7 +106,12 @@ test("the agent's lead upsert (on conflict conversation_id) updates the chat's o
 });
 
 test("calls: a business sees only its own numbers and calls, and can't write them directly", async () => {
-  const n = (await one(`insert into voice_numbers (workspace_id, e164, status) values ($1,'+2342010000001','active') returning id`, [wsA])).id;
+  // The server's insert: default status 'provisioning' and the provider columns (0004 had an older shape).
+  const n = (await one(`insert into voice_numbers (workspace_id, e164, country, created_by) values ($1,'+2342010000001','NG',$2) returning id`, [wsA, A])).id;
+  await db.query(`update voice_numbers set status='active', provider_number_id='pn_1', voice_credential_id='c', voice_phone_id='p', provider_endpoint_id='e', error=null where id=$1`, [n]);
+  await db.query(`update voice_numbers set status='released', released_at=now() where id=$1`, [n]);
+  const again = (await one(`insert into voice_numbers (workspace_id, e164) values ($1,'+2342010000001') returning id`, [wsA])).id;   // a released number can be bought again
+  assert.ok(again);
   await db.query(`insert into voice_calls (workspace_id, number_id, to_e164) values ($1,$2,'+2348031234567')`, [wsA, n]);
   const seenByB = await as(B, async () => (await db.query(`select count(*)::int c from voice_calls`)).rows[0].c + (await db.query(`select count(*)::int c from voice_numbers`)).rows[0].c);
   assert.equal(seenByB, 0);

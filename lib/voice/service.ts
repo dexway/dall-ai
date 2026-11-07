@@ -98,6 +98,9 @@ async function dial(callId: string): Promise<void> {
     await db.from("voice_calls").update({ status: "failed", error: "This number isn't active." }).eq("id", c.id);
     return;
   }
+  // Never call someone who asked this business to stop.
+  const { data: stop } = await db.from("opt_outs").select("e164").eq("workspace_id", c.workspace_id).eq("e164", c.to_e164).maybeSingle();
+  if (stop) { await db.from("voice_calls").update({ status: "cancelled", error: "This person asked not to be contacted." }).eq("id", c.id); return; }
   // Claim the row first so two runners can't dial the same person.
   const { data: claimed } = await db.from("voice_calls").update({ status: "dialing", started_at: new Date().toISOString() }).eq("id", c.id).eq("status", "queued").select("id");
   if (!claimed?.length) return;
