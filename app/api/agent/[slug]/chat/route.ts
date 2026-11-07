@@ -95,7 +95,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
   let team: { text: string; at: string }[] = [];
   if (after && !Number.isNaN(Date.parse(after))) {
     const { data } = await supabaseAdmin().from("messages").select("content,created_at").eq("conversation_id", found.conv.id)
-      .eq("role", "human").gt("created_at", new Date(after).toISOString()).order("created_at").limit(20);
+      .eq("role", "human").gt("created_at", after) // keep Postgres's microseconds: rounding to ms re-sent the same reply every poll.order("created_at").limit(20);
     team = (data ?? []).map((m) => ({ text: String((m.content as { text?: string }).text ?? ""), at: m.created_at }));
   }
   return NextResponse.json({ pending: await pendingOrder(found.conv.id), team });
