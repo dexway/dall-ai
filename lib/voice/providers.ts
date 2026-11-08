@@ -74,10 +74,19 @@ const sipOf = (row: Record<string, unknown>): Sip | null => {
   return username && password && domain ? { username, password, domain } : null;
 };
 
-/** Buys a number (sending it exactly as the inventory listed it) in direct-SIP mode. Returns its id. */
-export async function buyNumber(raw: string, country: string): Promise<string> {
-  if (!telecomLive()) return `test_${raw.replace(/\D/g, "")}`;
-  const bought = unwrap(await kros("/phone-numbers", { method: "POST", body: { number: raw, country_code: country, allow_inbound: true, allow_outbound: true, routing_mode: "direct_sip" } }));
+/**
+ * Buys a number in direct-SIP mode. The provider's docs ask for E.164 (+2342018893078); if it refuses
+ * that form, the number is retried exactly as its inventory listed it. Returns the provider's id.
+ */
+export async function buyNumber(e164: string, raw: string, country: string): Promise<string> {
+  if (!telecomLive()) return `test_${e164.replace(/\D/g, "")}`;
+  const attempt = (number: string) => kros("/phone-numbers", { method: "POST", body: { number, country_code: country, allow_inbound: true, allow_outbound: true, routing_mode: "direct_sip" } });
+  let bought: Record<string, unknown>;
+  try { bought = unwrap(await attempt(e164)); }
+  catch (e) {
+    if (!(e instanceof VoiceProviderError) || e.status >= 500 || raw === e164 || /BALANCE|CREDIT|KYC|LIMIT/i.test(e.code + e.message)) throw e;
+    bought = unwrap(await attempt(raw));
+  }
   const id = pick(bought, "id", "phone_number_id");
   if (!id) throw new VoiceProviderError("telecom", 502, "NO_ID", "The number was bought but no id came back.");
   return id;

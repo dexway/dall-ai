@@ -66,10 +66,12 @@ export async function provisionNumber(workspaceId: string, userId: string, e164:
   // Everything that can fail without spending money happens before the purchase.
   await ensureTelecomVoiceLink();
   await syncVoiceAgent(workspaceId);
+  // An earlier attempt at this number that never got bought is cleared, so trying again works.
+  await db.from("voice_numbers").delete().eq("workspace_id", workspaceId).eq("e164", e164).eq("status", "failed").is("provider_number_id", null);
   const { data: row, error } = await db.from("voice_numbers").insert({ workspace_id: workspaceId, e164, country, created_by: userId }).select("id").single();
   if (error) throw new Error(error.message.includes("duplicate") ? "That number is already taken." : error.message);
   try {
-    const providerId = await buyNumber(raw, country);
+    const providerId = await buyNumber(e164, raw, country);
     await db.from("voice_numbers").update({ provider_number_id: providerId }).eq("id", row.id);
   } catch (e) {
     await db.from("voice_numbers").update({ status: "failed", error: friendlyError(e).slice(0, 300) }).eq("id", row.id);
