@@ -103,3 +103,14 @@ export function inventoryE164(raw: string, country: string): string {
   if (cc && d.startsWith("0")) return `+${cc}${d.slice(1)}`;
   return cc ? `+${cc}${d}` : `+${d}`;
 }
+
+/**
+ * What Dall AI charges a business per number per month, in naira. The platform sets it with
+ * VOICE_NUMBER_MONTHLY_NGN; otherwise it's the provider cost × ₦1,600/$ × 1.5, rounded up to ₦500.
+ */
+export function numberPriceNgn(costUsd: number | null, env: Record<string, string | undefined> = process.env): number | null {
+  const flat = Number(env.VOICE_NUMBER_MONTHLY_NGN);
+  if (flat > 0) return Math.round(flat);
+  if (costUsd == null || !(costUsd > 0)) return null;
+  return Math.ceil((costUsd * 1600 * 1.5) / 500) * 500;
+}

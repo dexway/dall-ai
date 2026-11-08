@@ -17,3 +17,15 @@
 .vc-list > li small.muted { display: inline-block; margin-left: 6px; }
 .vc-list audio { margin-top: 8px; }
 .vc-list details summary { cursor: pointer; font-size: 13px; margin-top: 6px; }
+/* Confirm step and number page */
+.vn-card.pick { text-decoration: none; color: inherit; }
+a.vn-num { color: inherit; text-decoration: none; }
+.vn-focus { max-width: 720px; }
+.vn-focus h2 { font-size: 28px; letter-spacing: .3px; font-variant-numeric: tabular-nums; }
+.vn-points { margin: 12px 0; padding-left: 18px; display: grid; gap: 6px; }
+.vn-price { font-size: 15px; padding: 10px 12px; border-radius: 10px; background: var(--paper-2, #f3f6f1); display: inline-block; }
+.vn-steps { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin: 14px 0; }
+.vn-steps > div { border: 1px solid var(--line, #e3e3df); border-radius: 12px; padding: 12px 14px; }
+.vn-steps p { margin: 6px 0 10px; font-size: 13px; }
+.vn-inline { display: flex; gap: 8px; flex-wrap: wrap; }
+.vn-inline .input { flex: 1; min-width: 160px; }

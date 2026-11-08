@@ -56,3 +56,10 @@ test("provider inventory numbers: E.164 per country; the raw string is kept for 
   assert.equal(isoFromCalling("+1"), "US");
   assert.equal(isoFromCalling("ng"), "NG");
 });
+
+test("customers see Dall AI's naira price, not the provider's dollar cost", async () => {
+  const { numberPriceNgn } = await import("../lib/voice/rules.ts");
+  assert.equal(numberPriceNgn(3, {}), 7500);                                   // $3 × ₦1,600 × 1.5 = ₦7,200 → ₦7,500
+  assert.equal(numberPriceNgn(3, { VOICE_NUMBER_MONTHLY_NGN: "9000" }), 9000);  // the platform's own price wins
+  assert.equal(numberPriceNgn(null, {}), null);
+});

@@ -18,6 +18,7 @@ export const maxDuration = 60;
 const TABS = [["numbers", "Numbers"], ["agent", "Voice agent"], ["calls", "Calls"], ["campaigns", "Campaigns"]] as const;
 const go = (tab: string, q = "") => redirect(`/dashboard/calls?tab=${tab}${q ? `&${q}` : ""}`);
 const STATUS_NUM: Record<string, string> = { active: "Active", provisioning: "Setting up…", failed: "Didn't work", paused: "Paused" };
+const naira = (n: number) => `₦${n.toLocaleString("en-NG")}`;
 const countryName = (c: string) => VOICE_COUNTRIES.find(([k]) => k === c)?.[1] ?? c;
 /** "+2348012345678" → "+234 801 234 5678"; "+12018893052" → "+1 201 889 3052". */
 function prettyPhone(e: string): string {
@@ -43,19 +44,40 @@ async function buy(formData: FormData) {
   const e164 = toE164(String(formData.get("e164") ?? ""), "US");
   const country = String(formData.get("country") ?? "");
   if (!raw || !e164 || !VOICE_COUNTRIES.some(([c]) => c === country)) go("numbers", "error=That+number+couldn't+be+read.+Search+again.");
-  try { await provisionNumber(ctx.workspace.id, ctx.user.id, e164!, raw, country); }
-  catch (e) { rethrowRedirect(e); fail("numbers", e); }
+  let id: string | null = null;
+  try { id = await provisionNumber(ctx.workspace.id, ctx.user.id, e164!, raw, country); }
+  catch (e) {
+    rethrowRedirect(e);
+    // If the number was recorded, show its page with the reason and a retry; otherwise back to the list.
+    const { data: row } = await supabaseAdmin().from("voice_numbers").select("id").eq("workspace_id", ctx.workspace.id).eq("e164", e164!).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (row) redirect(`/dashboard/calls?number=${row.id}`);
+    fail("numbers", e);
+  }
   revalidatePath("/dashboard/calls");
-  go("numbers", "ok=number");
+  redirect(`/dashboard/calls?number=${id}&ok=number`);
 }
 
 async function retry(formData: FormData) {
   "use server";
   const ctx = await manager();
-  try { await connectVoiceNumber(ctx.workspace.id, String(formData.get("id") ?? "")); }
-  catch (e) { rethrowRedirect(e); fail("numbers", e); }
+  const id = String(formData.get("id") ?? "");
+  try { await connectVoiceNumber(ctx.workspace.id, id); }
+  catch (e) { rethrowRedirect(e); revalidatePath("/dashboard/calls"); redirect(`/dashboard/calls?number=${id}`); }
   revalidatePath("/dashboard/calls");
-  go("numbers", "ok=number");
+  redirect(`/dashboard/calls?number=${id}&ok=number`);
+}
+
+/** "Hear your agent": the agent calls the owner's own phone from this number. */
+async function testCall(formData: FormData) {
+  "use server";
+  const ctx = await manager();
+  const id = String(formData.get("number_id") ?? "");
+  const to = toE164(String(formData.get("to") ?? ""));
+  if (!to) redirect(`/dashboard/calls?number=${id}&error=${encodeURIComponent("Enter your phone number, e.g. 0803 123 4567.")}`);
+  try { await startSingleCall(ctx.workspace.id, ctx.user.id, id, to!, "Test call (you)"); }
+  catch (e) { rethrowRedirect(e); redirect(`/dashboard/calls?number=${id}&error=${encodeURIComponent(friendlyError(e).slice(0, 200))}`); }
+  revalidatePath("/dashboard/calls");
+  redirect(`/dashboard/calls?number=${id}&ok=call`);
 }
 
 async function release(formData: FormData) {
@@ -149,6 +171,13 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
   if (tab === "numbers" && sp.country) {
     try { available = await searchNumbers(sp.country, sp.contains); } catch (e) { searchError = friendlyError(e); }
   }
+  // Confirm step: look the picked number up again so the price and availability shown are real.
+  let picked: AvailableNumber | null = null;
+  if (sp.pick && sp.country) {
+    try { picked = (await searchNumbers(sp.country, sp.pick.replace(/\D/g, "").slice(-6))).find((a) => a.raw === sp.pick) ?? null; }
+    catch (e) { searchError = friendlyError(e); }
+  }
+  const viewing = sp.number ? (numbers ?? []).find((n) => n.id === sp.number) ?? null : null;
   const counts = new Map<string, Record<string, number>>();
   for (const c of calls ?? []) if (c.campaign_id) { const m = counts.get(c.campaign_id) ?? {}; m[c.status] = (m[c.status] ?? 0) + 1; counts.set(c.campaign_id, m); }
 
@@ -161,8 +190,57 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
         ? <div className="notice">Calling is being switched on. You can look around, but getting a number and calling will open shortly.</div>
         : <div className="notice">Calling is in test mode: you can try every step, but no real number is bought and no one is dialled.</div>)}
       {sp.error && <div className="notice notice-bad" role="alert">{sp.error}</div>}
-      {sp.ok && <div className="notice notice-ok">{{ number: "Your number is ready. Your assistant now answers it.", released: "Number released.", agent: "Voice agent saved.", call: "Calling now. The result appears below.", campaign: `Campaign created.${sp.skipped ? ` ${sp.skipped} line(s) skipped (not a valid number).` : ""}` }[sp.ok] ?? "Saved."}</div>}
+      {sp.ok && <div className="notice notice-ok">{{ number: "Your number is live. Your assistant answers it now.", released: "Number released.", agent: "Voice agent saved.", call: "Calling now. The result appears below.", campaign: `Campaign created.${sp.skipped ? ` ${sp.skipped} line(s) skipped (not a valid number).` : ""}` }[sp.ok] ?? "Saved."}</div>}
 
+      {picked && (
+        <section className="panel vn-focus">
+          <p className="muted" style={{ margin: 0 }}><Link href={`/dashboard/calls?tab=numbers&country=${picked.country}`}>← Back to numbers</Link></p>
+          <h2 style={{ margin: "8px 0 2px" }}>{prettyPhone(picked.e164)}</h2>
+          <p className="muted" style={{ marginTop: 0 }}>{countryName(picked.country)} local number</p>
+          <ul className="vn-points">
+            <li><b>{agent?.name ?? "Your assistant"}</b> answers every call to this number, day and night, using your products and prices.</li>
+            <li>Call customers from it, one at a time or as a campaign.</li>
+            <li>Every call shows a summary, recording and transcript in Dall AI.</li>
+          </ul>
+          <div className="vn-price">{picked.priceNgn != null ? <><b>{naira(picked.priceNgn)}</b> per month</> : "Monthly price shown at checkout"} · release it any time</div>
+          <form action={buy} style={{ marginTop: 14 }}>
+            <input type="hidden" name="raw" value={picked.raw} /><input type="hidden" name="e164" value={picked.e164} /><input type="hidden" name="country" value={picked.country} />
+            <button className="btn btn-lime">Confirm and get this number</button>
+          </form>
+        </section>
+      )}
+      {sp.pick && !picked && !searchError && <div className="notice">That number was just taken. Pick another one below.</div>}
+
+      {viewing && (
+        <section className={`panel vn-focus ${viewing.status}`}>
+          <p className="muted" style={{ margin: 0 }}><Link href="/dashboard/calls?tab=numbers">← All numbers</Link></p>
+          <h2 style={{ margin: "8px 0 2px" }}>{prettyPhone(viewing.e164)}</h2>
+          <p style={{ marginTop: 0 }}><span className={`vn-status ${viewing.status}`}>{viewing.status === "active" ? "● Live" : viewing.status === "provisioning" ? "Setting up…" : "Not connected yet"}</span> <span className="muted">· {countryName(viewing.country)}</span></p>
+          {viewing.status === "active" ? (
+            <>
+              <div className="vn-steps">
+                <div><b>1. Hear your agent</b><p className="muted">We&apos;ll call your phone from this number now.</p>
+                  <form action={testCall} className="vn-inline"><input type="hidden" name="number_id" value={viewing.id} /><input name="to" className="input" inputMode="tel" placeholder="Your phone, e.g. 0803 123 4567" required /><button className="btn btn-lime btn-sm">Call me</button></form>
+                </div>
+                <div><b>2. Share it</b><p className="muted">Put <span className="mono">{prettyPhone(viewing.e164)}</span> on your flyers, Instagram bio and WhatsApp status. {agent?.name ?? "Your assistant"} answers 24/7.</p></div>
+                <div><b>3. Call your customers</b><p className="muted">Upload a list and let {agent?.name ?? "your assistant"} call them for you.</p><Link href="/dashboard/calls?tab=campaigns" className="btn btn-line btn-sm">Start a campaign</Link></div>
+              </div>
+              <p className="muted" style={{ fontSize: 13 }}>Want it to sound different? <Link href="/dashboard/calls?tab=agent">Change the voice or greeting</Link>.</p>
+            </>
+          ) : (
+            <>
+              <p className="vn-err" style={{ fontSize: 14 }}>{viewing.error ?? "Still connecting to your voice agent."}</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {viewing.provider_number_id && <form action={retry}><input type="hidden" name="id" value={viewing.id} /><button className="btn btn-lime btn-sm">Retry setup</button></form>}
+                <form action={release}><input type="hidden" name="id" value={viewing.id} /><button className="btn btn-line btn-sm">{viewing.provider_number_id ? "Release number" : "Remove"}</button></form>
+              </div>
+              {viewing.provider_number_id && <p className="muted" style={{ fontSize: 13 }}>You won&apos;t be charged again when you retry.</p>}
+            </>
+          )}
+        </section>
+      )}
+
+      {!(picked || viewing) && (<>
       <nav className="cd-tabs" style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
         {TABS.map(([k, label]) => <Link key={k} href={`/dashboard/calls?tab=${k}`} className={`pill ${tab === k ? "on" : ""}`} aria-current={tab === k ? "page" : undefined}>{label}</Link>)}
       </nav>
@@ -174,7 +252,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
             {!(numbers ?? []).length && <p className="muted">No number yet. Pick one below.</p>}
             <div className="vn-grid">{(numbers ?? []).map((n) => (
               <div key={n.id} className={`vn-card ${n.status}`}>
-                <div className="vn-num">{prettyPhone(n.e164)}</div>
+                <Link href={`/dashboard/calls?number=${n.id}`} className="vn-num">{prettyPhone(n.e164)}</Link>
                 <div className="vn-meta">{countryName(n.country)} · <span className={`vn-status ${n.status}`}>{STATUS_NUM[n.status] ?? n.status}</span></div>
                 {n.error && <p className="vn-err">{n.error}</p>}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -196,14 +274,12 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
             {searchError && <p className="notice notice-bad">{searchError}</p>}
             {sp.country && !searchError && !available.length && <p className="notice">No {countryName(sp.country)} numbers are available right now. Try another country or check back soon.</p>}
             {available.length > 0 && <div className="vn-grid" style={{ marginTop: 14 }}>{available.map((a) => (
-              <form key={a.raw} action={buy} className="vn-card pick">
-                <input type="hidden" name="raw" value={a.raw} /><input type="hidden" name="e164" value={a.e164} /><input type="hidden" name="country" value={a.country} />
+              <Link key={a.raw} href={`/dashboard/calls?tab=numbers&country=${a.country}&pick=${encodeURIComponent(a.raw)}`} className="vn-card pick">
                 <div className="vn-num">{prettyPhone(a.e164)}</div>
-                <div className="vn-meta">{countryName(a.country)}{a.monthlyCostUsd != null ? ` · $${a.monthlyCostUsd.toFixed(2)}/month` : ""}</div>
-                <button className="btn btn-lime btn-sm">Get this number</button>
-              </form>
+                <div className="vn-meta">{countryName(a.country)}{a.priceNgn != null ? ` · ${naira(a.priceNgn)}/month` : ""}</div>
+                <span className="btn btn-lime btn-sm">Choose</span>
+              </Link>
             ))}</div>}
-            {available.length > 0 && <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>Getting a number charges the monthly price straight away. You can release it any time.</p>}
           </section>
         </>
       )}
@@ -291,6 +367,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
           </section>
         </>
       )}
+      </>)}
     </>
   );
 }
